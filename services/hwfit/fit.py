@@ -459,7 +459,7 @@ def rank_models(system, use_case=None, limit=50, search=None, sort="score", quan
         if "nvfp4" in (m.get("name") or "").lower():
             native_q = "NVFP4"
 
-        # MLX needs the mlx_lm runtime, which Odysseus does not generate serve
+        # MLX needs the mlx_lm runtime, which Shadow does not generate serve
         # commands for. Hide it on every backend, including Metal.
         if native_q.startswith("mlx-") or "mlx" in (m.get("name") or "").lower():
             continue
@@ -467,7 +467,7 @@ def rank_models(system, use_case=None, limit=50, search=None, sort="score", quan
         # ROCm support for vLLM/SGLang quantized safetensors is too brittle to
         # recommend blindly in the default scan. Keep AWQ/GPTQ/FP8 discoverable
         # only when the user explicitly picks that format from the quant filter;
-        # otherwise prefer GGUF/Q* entries that Odysseus can route through
+        # otherwise prefer GGUF/Q* entries that Shadow can route through
         # llama.cpp/Ollama without pretending "fits VRAM" means "servable".
         if rocm and is_prequantized(m) and not filter_native:
             continue

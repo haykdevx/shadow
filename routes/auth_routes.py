@@ -507,7 +507,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             api_key = integ.get("api_key", "")
             auth_type = (integ.get("auth_type") or "none").lower()
             headers = {
-                "Title": "Odysseus connectivity test",
+                "Title": "Shadow connectivity test",
                 "Tags": "white_check_mark",
                 "Priority": "default",
             }
@@ -520,7 +520,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 async with httpx.AsyncClient(timeout=8.0) as client:
                     r = await client.post(
                         full_url,
-                        content="Connectivity test from Odysseus. If you see this on your phone, ntfy is wired up correctly.",
+                        content="Connectivity test from Shadow. If you see this on your phone, ntfy is wired up correctly.",
                         headers=headers,
                     )
                 if r.is_success:

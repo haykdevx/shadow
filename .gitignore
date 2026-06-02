@@ -70,6 +70,9 @@ output.txt.txt
 # …and curated docs/ subfolder assets (e.g. accessibility before/after shots).
 !docs/**/*.png
 !docs/**/*.jpg
+# ...and Shadow PWA icons.
+!static/shadow-icon-192.png
+!static/shadow-icon-512.png
 !docs/**/*.gif
 !docs/**/*.webp
 

@@ -46,7 +46,7 @@ _HF_TOKEN_STATUS_SNIPPET = (
     'echo "[odysseus] HF token: applied"; '
     'else '
     'echo "[odysseus] HF token: NOT SET — gated/private models will be denied. '
-    'Add one in Odysseus Settings -> Cookbook -> HuggingFace Token."; '
+    'Add one in Shadow Settings -> Cookbook -> HuggingFace Token."; '
     'fi'
 )
 
@@ -436,7 +436,7 @@ def setup_cookbook_routes() -> APIRouter:
             lines.append(f"export HF_TOKEN='{_bash_squote(req.hf_token)}'")
         # Ensure pip-user scripts (e.g. hf CLI installed via --user) are on PATH
         lines.append('export PATH="$HOME/.local/bin:$PATH"')
-        # When Odysseus runs from a venv (e.g. native macOS install), put its bin
+        # When Shadow runs from a venv (e.g. native macOS install), put its bin
         # on PATH so the tmux shell finds the bundled `hf`/`python3` without an
         # activated venv. Local bash runs only — meaningless over SSH/Windows.
         if not req.remote_host and req.platform != "windows":
@@ -686,7 +686,7 @@ def setup_cookbook_routes() -> APIRouter:
                 cwd=str(Path.home()),
             )
         else:
-            # LOCAL scan: use sys.executable (the venv Python Odysseus is already
+            # LOCAL scan: use sys.executable (the venv Python Shadow is already
             # running under) — it's guaranteed real Python on all platforms.
             # Falling back to which_tool on Windows risks hitting the Microsoft
             # Store stub alias for "python3"/"python", which prints
@@ -908,7 +908,7 @@ def setup_cookbook_routes() -> APIRouter:
             runner_lines = ["#!/bin/bash"]
             runner_lines.extend(_user_shell_path_bootstrap())
             runner_lines.append('ODYSSEUS_PREFLIGHT_EXIT=""')
-            # Put Odysseus's own venv bin on PATH (local runs only) so the serve
+            # Put Shadow's own venv bin on PATH (local runs only) so the serve
             # shell resolves the bundled python3/hf, mirroring the download flow.
             if not remote:
                 runner_lines.append(_local_tooling_path_export(sys.executable))
@@ -1052,7 +1052,7 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('fi')
                 runner_lines.append('ODYSSEUS_OLLAMA_URL="http://${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}"')
                 if remote and _ollama_host in ("0.0.0.0", "::"):
-                    runner_lines.append('echo "[odysseus] WARNING: remote Ollama will bind to ${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT} so Odysseus can reach it from this host."')
+                    runner_lines.append('echo "[odysseus] WARNING: remote Ollama will bind to ${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT} so Shadow can reach it from this host."')
                     runner_lines.append('echo "[odysseus] Ollama has no built-in authentication; expose this only on a trusted LAN/VPN or provide an explicit OLLAMA_HOST with your own access controls."')
                 runner_lines.append('echo "Starting ollama server on ${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}..."')
                 runner_lines.append('OLLAMA_HOST="${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}" ollama serve')

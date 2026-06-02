@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 VERSION = "0.1.0"
+BRAND = "shadow" if os.getenv("SHADOW_CLI_BRAND") == "1" else "odysseus"
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
@@ -70,8 +71,8 @@ def _short_help(path: Path) -> str:
 
 def _print_listing() -> None:
     """`odysseus` with no args (or `odysseus help`) — print the table."""
-    sys.stdout.write(f"odysseus {VERSION} — every feature, on the shell.\n\n")
-    sys.stdout.write("Usage:  odysseus <subcommand> [args...]\n\n")
+    sys.stdout.write(f"{BRAND} {VERSION} — every feature, on the shell.\n\n")
+    sys.stdout.write(f"Usage:  {BRAND} <subcommand> [args...]\n\n")
     sys.stdout.write("Available subcommands:\n")
     subs = _list_subcommands()
     width = max((len(p.name[len("odysseus-"):]) for p in subs), default=10)
@@ -80,7 +81,7 @@ def _print_listing() -> None:
         desc = _short_help(p)
         sys.stdout.write(f"  {name:<{width + 2}}{desc}\n")
     sys.stdout.write(
-        "\nRun `odysseus help <subcommand>` for that tool's own --help.\n"
+        f"\nRun `{BRAND} help <subcommand>` for that tool's own --help.\n"
     )
 
 
@@ -92,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if argv[0] in ("-v", "--version"):
-        sys.stdout.write(f"odysseus {VERSION}\n")
+        sys.stdout.write(f"{BRAND} {VERSION}\n")
         return 0
 
     if argv[0] == "help":
@@ -102,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         sub = SCRIPTS_DIR / f"odysseus-{argv[1]}"
         if not sub.exists():
-            sys.stderr.write(f"odysseus: unknown subcommand {argv[1]!r}\n")
+            sys.stderr.write(f"{BRAND}: unknown subcommand {argv[1]!r}\n")
             return 1
         return subprocess.call([str(sub), "--help"])
 
@@ -111,8 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = SCRIPTS_DIR / f"odysseus-{name}"
     if not sub.exists():
         sys.stderr.write(
-            f"odysseus: unknown subcommand {name!r}. "
-            f"Try `odysseus help` to see available ones.\n"
+            f"{BRAND}: unknown subcommand {name!r}. "
+            f"Try `{BRAND} help` to see available ones.\n"
         )
         return 1
     # Run the subcommand with the project's venv Python so dependencies

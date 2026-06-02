@@ -1,12 +1,12 @@
 #!/bin/bash
-# Build a downloadable macOS launcher app + .dmg for Odysseus.
+# Build a downloadable macOS launcher app + .dmg for Shadow.
 #
 #   ./build-macos-app.sh
 #
 # Produces:
-#   dist/Odysseus.app   — double-click: starts the local server (using this
+#   dist/Shadow.app   — double-click: starts the local server (using this
 #                         repo's venv) and opens the UI in an app-style window.
-#   dist/Odysseus.dmg   — drag-to-Applications disk image (the downloadable).
+#   dist/Shadow.dmg   — drag-to-Applications disk image (the downloadable).
 #
 # This is a *launcher* wrapper: it drives the venv we set up in this repo, it
 # does not bundle Python. The install path is baked into the app at build time,
@@ -14,7 +14,7 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_NAME="Odysseus"
+APP_NAME="Shadow"
 INSTALL_DIR="$REPO_DIR"
 PORT="${ODYSSEUS_PORT:-7860}"
 DIST="$REPO_DIR/dist"
@@ -69,7 +69,7 @@ PLIST
 # ── Launcher executable (placeholders filled below) ──
 cat > "$APP/Contents/MacOS/$APP_NAME.tmpl" <<'LAUNCHER'
 #!/bin/bash
-# Odysseus.app — start the local server and open the UI in an app window.
+# Shadow.app — start the local server and open the UI in an app window.
 INSTALL_DIR="__INSTALL_DIR__"
 PORT="__PORT__"
 URL="http://127.0.0.1:${PORT}"
@@ -78,13 +78,13 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 UVICORN="$INSTALL_DIR/venv/bin/uvicorn"
 LOG="$INSTALL_DIR/logs/odysseus-app.log"
 
-notify() { /usr/bin/osascript -e "display notification \"$1\" with title \"Odysseus\"" >/dev/null 2>&1; }
+notify() { /usr/bin/osascript -e "display notification \"$1\" with title \"Shadow\"" >/dev/null 2>&1; }
 die_gui() {
-  /usr/bin/osascript -e "display dialog \"$1\" with title \"Odysseus\" buttons {\"OK\"} default button 1 with icon stop" >/dev/null 2>&1
+  /usr/bin/osascript -e "display dialog \"$1\" with title \"Shadow\" buttons {\"OK\"} default button 1 with icon stop" >/dev/null 2>&1
   exit 1
 }
 
-[ -x "$UVICORN" ] || die_gui "Odysseus isn't set up yet. Open Terminal and run:
+[ -x "$UVICORN" ] || die_gui "Shadow isn't set up yet. Open Terminal and run:
 
 cd $INSTALL_DIR
 python3.11 -m venv venv
@@ -129,7 +129,7 @@ trap 'kill $SERVER_PID 2>/dev/null; exit 0' TERM INT
 READY=0
 for i in $(seq 1 120); do
   /usr/bin/curl -s -o /dev/null --max-time 2 "$URL" && { READY=1; break; }
-  kill -0 "$SERVER_PID" 2>/dev/null || die_gui "Odysseus failed to start. Log:
+  kill -0 "$SERVER_PID" 2>/dev/null || die_gui "Shadow failed to start. Log:
 $LOG"
   sleep 1
 done
@@ -137,7 +137,7 @@ done
 if [ "$READY" = "1" ]; then
   open_ui
 else
-  notify "Odysseus is taking a while — open $URL once it finishes starting."
+  notify "Shadow is taking a while — open $URL once it finishes starting."
 fi
 wait "$SERVER_PID"
 LAUNCHER
@@ -166,4 +166,4 @@ echo "  $APP"
 echo "  $DIST/$APP_NAME.dmg"
 echo ""
 echo "Run it:        open '$APP'"
-echo "Install:       open '$DIST/$APP_NAME.dmg'  (drag Odysseus to Applications)"
+echo "Install:       open '$DIST/$APP_NAME.dmg'  (drag Shadow to Applications)"

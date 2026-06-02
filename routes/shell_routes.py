@@ -98,7 +98,7 @@ PTY_SUPPORTED = pty is not None and fcntl is not None and hasattr(os, "setsid")
 
 
 DOCKER_IN_CONTAINER_HINT = (
-    "Not available inside the Odysseus container by design. The image ships no "
+    "Not available inside the Shadow container by design. The image ships no "
     "docker CLI and no host socket is mounted. Run Docker-backed launches on a "
     "remote server, where docker is checked over SSH. Mounting /var/run/docker.sock "
     "into the container would grant it host-root access, so only do that if you "

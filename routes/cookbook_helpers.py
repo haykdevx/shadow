@@ -123,7 +123,7 @@ def _shell_path(p: str) -> str:
 def _local_tooling_path_export(executable: str) -> str:
     """Bash line prepending the running interpreter's bin dir to PATH.
 
-    When Odysseus runs from a virtualenv, that bin dir holds the tools the
+    When Shadow runs from a virtualenv, that bin dir holds the tools the
     cookbook runners shell out to (`hf`, `python`). tmux runners start from a
     fresh login shell with the venv NOT activated, so without this they can't
     find `hf` and downloads fail with "hf: command not found" — notably on
@@ -358,7 +358,7 @@ def _ollama_bind_from_cmd(cmd: str | None, *, default_host: str = "127.0.0.1") -
     """Return the Ollama bind host/port requested by a serve command.
 
     Plain local `ollama serve` defaults to loopback. Remote callers can pass a
-    wider default host so the resulting API is reachable by Odysseus.
+    wider default host so the resulting API is reachable by Shadow.
     """
     if not cmd:
         return default_host, "11434"

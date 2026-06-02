@@ -1721,7 +1721,7 @@ def setup_email_routes():
         permanent: bool = Query(False),
         owner: str = Depends(require_owner),
     ):
-        """Delete email messages stamped as Odysseus reminders."""
+        """Delete email messages stamped as Shadow reminders."""
         if account_id:
             _assert_owns_account(account_id, owner)
         deleted = 0
