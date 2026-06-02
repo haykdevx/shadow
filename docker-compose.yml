@@ -6,10 +6,10 @@ services:
     volumes:
       - ./data:/app/data:z
       - ./logs:/app/logs:z
-      # Cookbook remote-server SSH identity. Odysseus can generate a key here;
+      # Cookbook remote-server SSH identity. Shadow can generate a key here;
       # add the shown public key to each remote server's authorized_keys.
       - ./data/ssh:/app/.ssh:z
-      # Cookbook local model cache. Inside Docker, "Local" means the Odysseus
+      # Cookbook local model cache. Inside Docker, "Local" means the Shadow
       # container, so persist its HuggingFace cache under ./data/huggingface.
       - ./data/huggingface:/app/.cache/huggingface:z
       # Cookbook-installed Python CLIs/packages (vLLM, llama-cpp-python, etc.)
@@ -34,6 +34,10 @@ services:
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - LOCALHOST_BYPASS=${LOCALHOST_BYPASS:-false}
+      - SHADOW_HOME_AGENT_URL=${SHADOW_HOME_AGENT_URL:-}
+      - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
+      - SHADOW_HOME_AGENT_ALLOW_PUBLIC=${SHADOW_HOME_AGENT_ALLOW_PUBLIC:-false}
+      - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
       - ODYSSEUS_ADMIN_USER=${ODYSSEUS_ADMIN_USER:-admin}
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
@@ -66,6 +70,25 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+    restart: unless-stopped
+
+  shadow-telegram:
+    build: .
+    profiles: ["telegram"]
+    command: ["python", "scripts/shadow_telegram.py"]
+    volumes:
+      - ./data:/app/data:z
+    environment:
+      - SHADOW_TELEGRAM_BOT_TOKEN=${SHADOW_TELEGRAM_BOT_TOKEN:-}
+      - SHADOW_TELEGRAM_ALLOWED_USER_IDS=${SHADOW_TELEGRAM_ALLOWED_USER_IDS:-}
+      - SHADOW_APP_URL=http://odysseus:7000
+      - SHADOW_APP_API_TOKEN=${SHADOW_APP_API_TOKEN:-}
+      - SHADOW_HOME_AGENT_URL=${SHADOW_HOME_AGENT_URL:-}
+      - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
+      - SHADOW_HOME_AGENT_ALLOW_PUBLIC=${SHADOW_HOME_AGENT_ALLOW_PUBLIC:-false}
+      - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
+    depends_on:
+      - odysseus
     restart: unless-stopped
 
   chromadb:
