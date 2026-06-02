@@ -168,6 +168,8 @@ _TOOL_NAME_MAP = {
     "manage_settings": "manage_settings",
     "settings": "manage_settings",
     "preferences": "manage_settings",
+    "pc_control": "pc_control",
+    "home_pc": "pc_control",
     "manage_notes": "manage_notes",
     "notes": "manage_notes",
     "todo": "manage_notes",

@@ -28,6 +28,7 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "manage_settings",
     "api_call",
     "app_api",
+    "pc_control",
     "send_email",
     "reply_to_email",
     "list_emails",

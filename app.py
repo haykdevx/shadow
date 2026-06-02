@@ -75,8 +75,8 @@ logger = logging.getLogger(__name__)
 
 # ========= APP =========
 app = FastAPI(
-    title="AI Chat Application",
-    description="Comprehensive AI chat with memory, research, and multi-modal capabilities",
+    title="Shadow Workspace",
+    description="Private AI workspace with memory, research, voice, and gated home-PC control",
     version="1.0.0",
 )
 
@@ -697,6 +697,9 @@ app.include_router(setup_contacts_routes())
 
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
+
+from routes.shadow_routes import setup_shadow_routes
+app.include_router(setup_shadow_routes())
 
 # ========= ROUTES (kept in app.py) =========
 

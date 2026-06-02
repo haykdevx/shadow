@@ -177,6 +177,7 @@ _ADMIN_TOOLS = {
     "serve_model",
     "stop_served_model",
     "cancel_download",
+    "pc_control",
 }
 
 
@@ -564,7 +565,7 @@ async def execute_tool_block(
         do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
-        do_app_api,
+        do_app_api, do_pc_control,
     )
 
     tool = block.tool_type
@@ -734,6 +735,9 @@ async def execute_tool_block(
     elif tool == "list_cached_models":
         desc = "list_cached_models"
         result = await do_list_cached_models(content, owner=owner)
+    elif tool == "pc_control":
+        desc = "pc_control"
+        result = await do_pc_control(content, owner=owner)
     elif tool == "app_api":
         desc = "app_api"
         result = await do_app_api(content, owner=owner)
