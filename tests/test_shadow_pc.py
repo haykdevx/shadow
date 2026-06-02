@@ -12,6 +12,7 @@ def _clean_pending(monkeypatch):
     monkeypatch.setenv("SHADOW_HOME_AGENT_URL", "http://100.64.10.20:8765")
     monkeypatch.setenv("SHADOW_HOME_AGENT_TOKEN", "a" * 64)
     monkeypatch.delenv("SHADOW_HOME_AGENT_ALLOW_PUBLIC", raising=False)
+    monkeypatch.delenv("SHADOW_HOME_AGENT_SOCKET", raising=False)
     yield
     shadow_pc._PENDING.clear()
 
@@ -27,6 +28,13 @@ def test_agent_url_accepts_ipv6_loopback():
 def test_agent_url_rejects_public_address():
     with pytest.raises(shadow_pc.ShadowPcError, match="Refusing a public home-agent URL"):
         shadow_pc.validate_agent_url("https://8.8.8.8:8765")
+
+
+def test_socket_transport_is_configured_without_url(monkeypatch):
+    monkeypatch.delenv("SHADOW_HOME_AGENT_URL")
+    monkeypatch.setenv("SHADOW_HOME_AGENT_SOCKET", "/app/data/shadow-home-agent.sock")
+    assert shadow_pc.configured() is True
+    assert shadow_pc._validated_agent_url() == "http://shadow-home-agent"
 
 
 def test_read_action_executes_without_pending(monkeypatch):
@@ -47,6 +55,14 @@ def test_write_action_waits_for_explicit_confirmation(monkeypatch):
     assert shadow_pc.list_pending()[0]["action"] == "lock"
     assert shadow_pc.confirm_action(pending_id) == {"status": "executed", "action": "lock", "result": {"ok": True}}
     assert calls == [("lock", {}, True)]
+    assert shadow_pc.list_pending() == []
+
+
+def test_unconfigured_write_action_is_not_queued(monkeypatch):
+    monkeypatch.delenv("SHADOW_HOME_AGENT_URL")
+    monkeypatch.delenv("SHADOW_HOME_AGENT_TOKEN")
+    with pytest.raises(shadow_pc.ShadowPcError, match="not configured"):
+        shadow_pc.request_action("lock")
     assert shadow_pc.list_pending() == []
 
 
@@ -74,6 +90,13 @@ def test_home_agent_status_is_read_only():
     result = execute_action("status", {}, confirmed=False)
     assert result["ok"] is True
     assert result["hostname"]
+
+
+def test_home_agent_executes_confirmed_lock(monkeypatch):
+    calls = []
+    monkeypatch.setattr("companion.home_agent._run_first", lambda candidates: calls.append(candidates) or "")
+    assert execute_action("lock", {}, confirmed=True) == {"ok": True}
+    assert calls
 
 
 def test_pc_control_registered_for_agent_tooling():

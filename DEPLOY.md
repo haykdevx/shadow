@@ -137,6 +137,21 @@ Restart Shadow:
 docker compose up -d --build
 ```
 
+For a same-host Docker install, prefer a Unix socket instead of TCP. Set the
+host companion env file to an absolute host path inside the checkout data
+directory, and set the app `.env` to the mounted in-container path:
+
+```dotenv
+# ~/.config/shadow/home-agent.env on the host
+SHADOW_HOME_AGENT_SOCKET=/home/YOUR_USER/shadow/data/shadow-home-agent.sock
+
+# .env consumed by Docker Compose
+SHADOW_HOME_AGENT_SOCKET=/app/data/shadow-home-agent.sock
+SHADOW_HOME_AGENT_URL=
+```
+
+The socket is created as mode `600`; no home-companion TCP port is exposed.
+
 Read-only status, process, screenshot, and clipboard reads execute directly.
 Lock, typing, keypresses, clipboard writes, media, volume, and application
 control wait for explicit approval. App launching is label-based and restricted

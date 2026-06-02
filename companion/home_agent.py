@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import ThreadingMixIn, UnixStreamServer
 from pathlib import Path
 from typing import Any
 
@@ -280,15 +281,35 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": "Home agent action failed"})
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[shadow-home-agent] {self.address_string()} {fmt % args}")
+        print(f"[shadow-home-agent] {self.client_address or 'local-socket'} {fmt % args}")
+
+
+class ThreadingUnixHTTPServer(ThreadingMixIn, UnixStreamServer):
+    daemon_threads = True
 
 
 def main() -> None:
-    bind = os.getenv("SHADOW_HOME_AGENT_BIND", "127.0.0.1").strip()
-    port = int(os.getenv("SHADOW_HOME_AGENT_PORT", "8765"))
     token = os.getenv("SHADOW_HOME_AGENT_TOKEN", "").strip()
     if len(token) < 32:
         raise SystemExit("Set SHADOW_HOME_AGENT_TOKEN to a random secret of at least 32 characters")
+    socket_path = os.getenv("SHADOW_HOME_AGENT_SOCKET", "").strip()
+    if socket_path:
+        path = Path(socket_path)
+        if not path.is_absolute():
+            raise SystemExit("SHADOW_HOME_AGENT_SOCKET must be an absolute path")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)
+        server = ThreadingUnixHTTPServer(str(path), Handler)
+        os.chmod(path, 0o600)
+        print(f"Shadow home agent listening on unix:{path}")
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+            path.unlink(missing_ok=True)
+        return
+    bind = os.getenv("SHADOW_HOME_AGENT_BIND", "127.0.0.1").strip()
+    port = int(os.getenv("SHADOW_HOME_AGENT_PORT", "8765"))
     if bind in {"0.0.0.0", "::"} and os.getenv("SHADOW_HOME_AGENT_ALLOW_WILDCARD", "").lower() not in {"1", "true", "yes"}:
         raise SystemExit("Refusing wildcard bind. Bind the Tailscale IP or set SHADOW_HOME_AGENT_ALLOW_WILDCARD=true explicitly.")
     print(f"Shadow home agent listening on {bind}:{port}")

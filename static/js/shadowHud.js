@@ -6,6 +6,7 @@ let statusEl = null;
 let detailEl = null;
 let pendingEl = null;
 let previewEl = null;
+let noteEl = null;
 
 function text(value) {
   return value === undefined || value === null ? '' : String(value);
@@ -74,6 +75,18 @@ function renderOverview(data) {
   if (!statusEl || !detailEl) return;
   statusEl.classList.toggle('online', Boolean(data.online));
   statusEl.textContent = data.online ? 'linked' : (data.configured ? 'offline' : 'not configured');
+  ['shadow-hud-screen', 'shadow-hud-lock'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !data.online;
+  });
+  if (noteEl) {
+    noteEl.textContent = data.online
+      ? ''
+      : (data.error || (data.configured
+        ? 'Home companion is offline. Check the host service.'
+        : 'Home link is not configured. Add the private companion URL and token.'));
+    noteEl.hidden = Boolean(data.online);
+  }
   const pc = data.pc || {};
   const mem = pc.memory || {};
   const disk = pc.disk || {};
@@ -136,6 +149,7 @@ function init() {
   detailEl = document.getElementById('shadow-hud-detail');
   pendingEl = document.getElementById('shadow-hud-pending');
   previewEl = document.getElementById('shadow-hud-preview');
+  noteEl = document.getElementById('shadow-hud-note');
   document.getElementById('shadow-hud-refresh')?.addEventListener('click', refresh);
   document.getElementById('shadow-hud-screen')?.addEventListener('click', () => invoke('screenshot'));
   document.getElementById('shadow-hud-lock')?.addEventListener('click', () => invoke('lock'));

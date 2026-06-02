@@ -55,6 +55,10 @@ def _agent_token() -> str:
     return os.getenv("SHADOW_HOME_AGENT_TOKEN", "").strip()
 
 
+def _agent_socket() -> str:
+    return os.getenv("SHADOW_HOME_AGENT_SOCKET", "").strip()
+
+
 def _private_ip(value: str) -> bool:
     try:
         ip = ipaddress.ip_address(value)
@@ -91,7 +95,17 @@ def validate_agent_url(url: str) -> str:
 
 
 def configured() -> bool:
-    return bool(_agent_url() and _agent_token())
+    return bool((_agent_socket() or _agent_url()) and len(_agent_token()) >= 32)
+
+
+def _validated_agent_url() -> str:
+    if not (_agent_socket() or _agent_url()) or len(_agent_token()) < 32:
+        raise ShadowPcError("Home PC bridge is not configured")
+    if _agent_socket():
+        if not os.path.isabs(_agent_socket()):
+            raise ShadowPcError("SHADOW_HOME_AGENT_SOCKET must be an absolute path")
+        return "http://shadow-home-agent"
+    return validate_agent_url(_agent_url())
 
 
 def _clean_args(args: Any) -> dict[str, Any]:
@@ -103,11 +117,10 @@ def _clean_args(args: Any) -> dict[str, Any]:
 
 
 def _call_home_agent(action: str, args: dict[str, Any], *, confirmed: bool = False) -> dict[str, Any]:
-    if not configured():
-        raise ShadowPcError("Home PC bridge is not configured")
-    url = validate_agent_url(_agent_url())
+    url = _validated_agent_url()
+    transport = httpx.HTTPTransport(uds=_agent_socket()) if _agent_socket() else None
     try:
-        with httpx.Client(timeout=httpx.Timeout(15.0, connect=4.0)) as client:
+        with httpx.Client(transport=transport, timeout=httpx.Timeout(15.0, connect=4.0)) as client:
             response = client.post(
                 f"{url}/v1/action",
                 headers={"Authorization": f"Bearer {_agent_token()}"},
@@ -136,6 +149,7 @@ def request_action(action: str, args: Any = None, *, requested_by: str = "web") 
     if action not in ALL_ACTIONS:
         raise ShadowPcError(f"Unsupported home PC action: {action or '(missing)'}")
     clean_args = _clean_args(args)
+    _validated_agent_url()
     if action in READ_ACTIONS:
         return _call_home_agent(action, clean_args, confirmed=False)
     now = time.time()
