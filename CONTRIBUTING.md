@@ -1,4 +1,4 @@
-# Contributing to Odysseus
+# Contributing to Shadow
 
 Thanks for helping. The project is moving quickly, so the best contributions are focused, easy to review, and easy to test.
 

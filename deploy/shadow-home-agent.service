@@ -1,0 +1,17 @@
+[Unit]
+Description=Shadow private home-PC companion
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/shadow
+EnvironmentFile=%h/.config/shadow/home-agent.env
+ExecStart=/usr/bin/python3 %h/shadow/scripts/shadow_home_agent.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

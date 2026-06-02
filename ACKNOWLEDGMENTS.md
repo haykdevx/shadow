@@ -1,5 +1,10 @@
 # Acknowledgments
 
+Shadow is a fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus).
+The upstream authors and contributors retain their original copyright and
+attribution. Shadow-specific additions are layered on top of that foundation.
+
+
 Odysseus stands on the shoulders of a lot of open-source work. This file
 credits the projects whose code, assets, or designs are included in or
 adapted by this repository, and notes their licenses.
