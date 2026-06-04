@@ -1,6 +1,6 @@
 # Security Policy
 
-Shadow is a fork of Shadow and is a self-hosted AI workspace with privileged local capabilities. Please do not run it as a public, unauthenticated service.
+Shadow is a fork of Odysseus and is a self-hosted AI workspace with privileged local capabilities. Please do not run it as a public, unauthenticated service.
 
 ## Supported Versions
 
