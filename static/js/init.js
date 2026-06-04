@@ -31,10 +31,10 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
     const data = await res.json().catch(() => ({}));
     const liveUser = (data && data.username) || '';
     if (!liveUser) return;
-    const KEY = 'odysseus-auth-user';
+    const KEY = 'shadow-auth-user';
     const cachedUser = localStorage.getItem(KEY);
     if (cachedUser && cachedUser !== liveUser) {
-      const _keepKeys = new Set(['odysseus-last-user', KEY]);
+      const _keepKeys = new Set(['shadow-last-user', KEY]);
       const toRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -63,6 +63,8 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
       hideOn('#tool-research-btn, #research-toggle-btn', privs.can_use_research);
       // Memory & skills (rail/tool button only — UI/API entry).
       hideOn('#tool-memory-btn', privs.can_manage_memory);
+      // Machine control is admin-only server-side; hide the entry for non-admins.
+      hideOn('#tool-command-btn', data && data.is_admin !== false);
       // Agent mode toggle — force chat mode by hiding the Agent toggle button.
       if (privs.can_use_agent === false) {
         const _agent = document.getElementById('mode-agent-btn');

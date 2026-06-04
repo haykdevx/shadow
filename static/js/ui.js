@@ -164,8 +164,8 @@ function _activateSpaceCard(card) {
 }
 
 function _initHoverCardSpaceToggle() {
-  if (document._odysseusHoverCardSpaceToggle) return;
-  document._odysseusHoverCardSpaceToggle = true;
+  if (document._shadowHoverCardSpaceToggle) return;
+  document._shadowHoverCardSpaceToggle = true;
   document.addEventListener('pointerover', (e) => {
     _lastPointerClientX = e.clientX;
     _lastPointerClientY = e.clientY;
@@ -1173,8 +1173,8 @@ if ('ontouchstart' in window || window.innerWidth <= 768) {
 // Priority: expanded library card → open chat thinking block → topmost modal.
 // Runs capture-phase + stopImmediatePropagation so per-modal ESC listeners
 // never also fire (which would otherwise close several modals at once).
-if (!window._odyEscExpandGuard) {
-  window._odyEscExpandGuard = true;
+if (!window._shdEscExpandGuard) {
+  window._shdEscExpandGuard = true;
 
   // Auto-promote any modal that becomes visible to the top of the z-stack.
   // Every modal shares `z-index: 250` from the base `.modal` rule, so visual

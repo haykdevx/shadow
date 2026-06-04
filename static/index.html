@@ -14,10 +14,10 @@
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
   <link rel="apple-touch-icon" href="/static/shadow-icon-192.png">
   <script nonce="{{CSP_NONCE}}">
-  window._odysseusLoadTime = Date.now();
+  window._shadowLoadTime = Date.now();
   (function(){
     try {
-      var t = JSON.parse(localStorage.getItem('odysseus-theme'));
+      var t = JSON.parse(localStorage.getItem('shadow-theme'));
       if (t && t.colors) {
         var s = document.documentElement.style;
         var c = t.colors;
@@ -100,7 +100,7 @@
   (function(){
     try {
       var path = (window.location.pathname || '').toLowerCase();
-      var theme = (function(){ try { return JSON.parse(localStorage.getItem('odysseus-theme')); } catch(_) { return null; } })();
+      var theme = (function(){ try { return JSON.parse(localStorage.getItem('shadow-theme')); } catch(_) { return null; } })();
       var ac = (theme && (theme.red || theme.colors && theme.colors.red)) || '#e06c75';
       // Shapes are line-stroke SVGs (no emoji glyphs). Each entry returns
       // the inner SVG markup rendered against currentColor=`ac`.
@@ -209,7 +209,7 @@
       if (k) k.addEventListener('load', function(){ k.media = 'all'; }, { once: true });
       var m = document.getElementById('mermaid-script');
       if (m) m.addEventListener('load', function(){
-        if (window.odysseusInitMermaid) window.odysseusInitMermaid();
+        if (window.shadowInitMermaid) window.shadowInitMermaid();
       }, { once: true });
     })();
   </script>
@@ -821,6 +821,10 @@
           </svg>
           <span class="grow">Brain</span>
         </div>
+        <div class="list-item" id="tool-command-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M4 4h16v16H4z"/><path d="M8 9h8"/><path d="M8 13h5"/><path d="M8 17h3"/></svg>
+          <span class="grow">Command</span>
+        </div>
         <div class="list-item" id="tool-calendar-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -835,6 +839,14 @@
         <div class="list-item" id="tool-compare-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
           <span class="grow">Compare</span>
+        </div>
+        <div class="list-item" id="tool-magi-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M12 2l2.6 6.9L22 9.2l-5.7 4.6 1.9 7.2L12 17.1 5.8 21l1.9-7.2L2 9.2l7.4-.3L12 2z"/></svg>
+          <span class="grow">MAGI</span>
+        </div>
+        <div class="list-item" id="tool-music-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          <span class="grow">Music</span>
         </div>
         <div class="list-item" id="tool-cookbook-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -935,19 +947,6 @@
       <div class="welcome-name"><img class="welcome-boat" src="/static/shadow-mark.svg" alt="">Shadow</div>
       <div class="welcome-sub" id="welcome-sub">Welcome, <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">type /setup</span> to get started.</div>
       <div class="welcome-tip" id="welcome-tip"></div>
-      <section class="shadow-hud" id="shadow-hud" aria-label="Linked home PC">
-        <div class="shadow-hud-head"><span class="shadow-hud-title">Shadow // home link</span><span class="shadow-hud-status" id="shadow-hud-status">checking</span></div>
-        <div class="shadow-hud-detail" id="shadow-hud-detail"></div>
-        <div class="shadow-hud-actions">
-          <button type="button" class="shadow-hud-btn" id="shadow-hud-refresh">Refresh</button>
-          <button type="button" class="shadow-hud-btn" id="shadow-hud-screen">Capture screen</button>
-          <button type="button" class="shadow-hud-btn" id="shadow-hud-lock">Lock PC</button>
-          <a class="shadow-hud-btn" href="/tasks">Tasks</a><a class="shadow-hud-btn" href="/memory">Memory</a>
-        </div>
-        <div class="shadow-hud-note" id="shadow-hud-note" hidden></div>
-        <div id="shadow-hud-pending"></div>
-        <img class="shadow-hud-preview" id="shadow-hud-preview" alt="Home PC screenshot" hidden>
-      </section>
       <button type="button" class="incognito-btn" id="incognito-btn" title="Enable Nobody mode — no memory, no history saved">
         <svg class="eye-open" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
@@ -1109,6 +1108,13 @@
             <span style="font-size:11px;margin-left:2px;">Compare</span>
             <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
+          <!-- MAGI toolbar indicator (hidden until active) -->
+          <button type="button" class="input-icon-btn tool-indicator magi-indicator" title="MAGI deliberation active - click to deactivate" id="magi-indicator-btn" style="display:none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.6 6.9L22 9.2l-5.7 4.6 1.9 7.2L12 17.1 5.8 21l1.9-7.2L2 9.2l7.4-.3L12 2z"/></svg>
+            <span style="font-size:11px;margin-left:2px;">MAGI</span>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+          <input type="checkbox" id="magi-toggle" style="display:none;">
         </div>
         <div class="chat-input-right">
           <!-- Agent / Chat mode toggle -->

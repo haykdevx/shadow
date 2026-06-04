@@ -3282,7 +3282,7 @@ function _saveProject() {
   }
   const project = {
     v: 1,
-    type: 'odysseus-gallery-editor-project',
+    type: 'shadow-gallery-editor-project',
     imgWidth: state.imgWidth,
     imgHeight: state.imgHeight,
     activeLayerId: state.activeLayerId,
@@ -3321,7 +3321,7 @@ function _loadProjectPrompt() {
     try {
       const text = await file.text();
       const proj = JSON.parse(text);
-      if (proj.type !== 'odysseus-gallery-editor-project') {
+      if (proj.type !== 'shadow-gallery-editor-project') {
         if (uiModule) uiModule.showToast('Not a project file', 5000);
         return;
       }

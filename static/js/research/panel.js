@@ -42,8 +42,8 @@ let _expandedJobId = null;
 let _markdownModule = null;
 let _sessionModule = null;
 let _settingsCollapsed = false;
-const _SETTINGS_KEY = 'odysseus-research-settings';
-const _COLLAPSE_KEY = 'odysseus-research-settings-collapsed';
+const _SETTINGS_KEY = 'shadow-research-settings';
+const _COLLAPSE_KEY = 'shadow-research-settings-collapsed';
 
 try { _settingsCollapsed = localStorage.getItem(_COLLAPSE_KEY) === '1'; } catch {}
 
@@ -447,7 +447,7 @@ function _wireEvents(pane) {
     _settingsCollapsed = !_settingsCollapsed;
     body.style.display = _settingsCollapsed ? 'none' : '';
     btn.classList.toggle('collapsed', _settingsCollapsed);
-    try { localStorage.setItem('odysseus-research-settings-collapsed', _settingsCollapsed ? '1' : '0'); } catch {}
+    try { localStorage.setItem('shadow-research-settings-collapsed', _settingsCollapsed ? '1' : '0'); } catch {}
   });
 
   const queryInput = pane.querySelector('#research-query');

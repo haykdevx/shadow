@@ -11,6 +11,8 @@ import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 import chatModule from './js/chat.js';
 import compareModule from './js/compare/index.js';
+import magiModule from './js/magi.js';
+import musicModule from './js/music.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
 import markdownModule from './js/markdown.js';
@@ -18,7 +20,7 @@ import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
-import shadowHudModule from './js/shadowHud.js';
+import commandPageModule from './js/commandPage.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
@@ -51,6 +53,8 @@ window.sessionModule = sessionModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
+window.magiModule = magiModule;
+window.commandPageModule = commandPageModule;
 
 // Redirect to login on 401 from any fetch
 const _origFetch = window.fetch;
@@ -76,7 +80,7 @@ async function _refreshDefaultChat() {
     const d = await (await fetch('/api/default-chat')).json();
     if (d && d.endpoint_url && d.model) {
       _defaultChat = d;
-      try { window.__odysseusDefaultChat = d; } catch (_) {}
+      try { window.__shadowDefaultChat = d; } catch (_) {}
       return d;
     }
   } catch (_) {}
@@ -999,6 +1003,7 @@ function initializeEventListeners() {
       setTimeout(_goFullscreen, 200);
     },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
+    '/command':  () => commandPageModule && commandPageModule.openPage({ push: false }),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
@@ -1009,7 +1014,7 @@ function initializeEventListeners() {
   // click handler in emailInbox, sessionModule's loaded session list) are
   // still being wired up further down in this same function. Stash the
   // opener so it runs from sessionModule.loadSessions().finally() below.
-  if (_opener) window._odysseusRouteOpener = _opener;
+  if (_opener) window._shadowRouteOpener = _opener;
 
   // Archive browser tool button
   const toolLibraryBtn = el('tool-library-btn');
@@ -1272,7 +1277,7 @@ function initializeEventListeners() {
     modelSortDropdown.querySelectorAll('.sort-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const mode = opt.dataset.sort;
-        Storage.set('odysseus-model-sort', mode);
+        Storage.set('shadow-model-sort', mode);
         if (modelsModule) modelsModule.refreshModels();
         modelSortDropdown.style.display = 'none';
         uiModule.showToast('Models sorted: ' + opt.textContent.trim().toLowerCase());
@@ -1284,8 +1289,8 @@ function initializeEventListeners() {
 
   // Feature visibility — hide admin-disabled features
   // Use prefetched data from login page if available
-  const _prefetchedFeatures = sessionStorage.getItem('ody-prefetch-features');
-  sessionStorage.removeItem('ody-prefetch-features');
+  const _prefetchedFeatures = sessionStorage.getItem('shd-prefetch-features');
+  sessionStorage.removeItem('shd-prefetch-features');
   window._initFeaturesReady = (_prefetchedFeatures
     ? Promise.resolve(JSON.parse(_prefetchedFeatures))
     : fetch(`${API_BASE}/api/auth/features`, { credentials: 'same-origin' }).then(r => r.json())
@@ -1312,8 +1317,8 @@ function initializeEventListeners() {
     .catch(() => {});
 
   // Hide Gallery when image generation is disabled in settings
-  const _prefetchedSettings = sessionStorage.getItem('ody-prefetch-settings');
-  sessionStorage.removeItem('ody-prefetch-settings');
+  const _prefetchedSettings = sessionStorage.getItem('shd-prefetch-settings');
+  sessionStorage.removeItem('shd-prefetch-settings');
   window._initSettingsReady = (_prefetchedSettings
     ? Promise.resolve(JSON.parse(_prefetchedSettings))
     : fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' }).then(r => r.json())
@@ -1582,7 +1587,7 @@ function initializeEventListeners() {
   })();
 
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
-  const SPLASH_COUNT_KEY = 'odysseus-tool-splash-counts';
+  const SPLASH_COUNT_KEY = 'shadow-tool-splash-counts';
   const SPLASH_MAX = 2;
   const _toolSplashes = {
     web: { role: 'Web Search', text: 'Searches the web for relevant information to include in the response. Results are fetched and summarized before the AI answers.' },
@@ -2328,7 +2333,7 @@ function initializeEventListeners() {
   }
 
   // ── UI Visibility (Customize UI modal) ──
-  const UI_VIS_KEY = 'odysseus-ui-visibility';
+  const UI_VIS_KEY = 'shadow-ui-visibility';
 
   // Selector map: key → CSS selector(s) for targets
   const UI_VIS_MAP = {
@@ -2348,6 +2353,7 @@ function initializeEventListeners() {
     'tool-gallery':        '#tool-gallery-btn',
     'tool-library':        '#tool-library-btn',
     'tool-memory':         '#tool-memory-btn',
+    'tool-command':        '#tool-command-btn',
     'tool-notes':          '#tool-notes-btn',
     'tool-tasks':          '#tool-tasks-btn',
     'tool-theme':          '#tool-theme-btn',
@@ -2609,7 +2615,7 @@ function initializeEventListeners() {
 
   // Migrate old toolbar visibility key if present
   (function migrateOldToolbarVis() {
-    const OLD_KEY = 'odysseus-toolbar-visibility';
+    const OLD_KEY = 'shadow-toolbar-visibility';
     try {
       const old = Storage.getJSON(OLD_KEY, null);
       if (old && typeof old === 'object') {
@@ -3371,9 +3377,9 @@ function initializeEventListeners() {
 // ============================================
 // INITIALIZATION ON PAGE LOAD
 // ============================================
-function startOdysseusApp() {
-  if (window.__odysseusAppStarted) return;
-  window.__odysseusAppStarted = true;
+function startShadowApp() {
+  if (window.__shadowAppStarted) return;
+  window.__shadowAppStarted = true;
   // Set CSS variables
   document.documentElement.style.setProperty('--line-height', '20px');
 
@@ -3411,6 +3417,8 @@ function startOdysseusApp() {
   searchModule.init(API_BASE);
   chatModule.init(API_BASE);
   chatModule.initListeners();
+  magiModule.init(API_BASE);
+  musicModule.init(API_BASE);
   groupModule.init(API_BASE);
   // Initialize compare module
   if (compareModule) {
@@ -3422,7 +3430,7 @@ function startOdysseusApp() {
     documentModule.init(API_BASE);
     // Restore document panel if it was open before refresh
     const _curSession = sessionModule && sessionModule.getCurrentSessionId();
-    if (_curSession && localStorage.getItem('odysseus-doc-open-' + _curSession) === '1') {
+    if (_curSession && localStorage.getItem('shadow-doc-open-' + _curSession) === '1') {
       documentModule.loadSessionDocs(_curSession);
     }
   }  
@@ -3585,7 +3593,7 @@ function startOdysseusApp() {
   const _newChatIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
   // Expose icons globally so chat.js updateSubmitButton can use them
-  window._odysseusBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
+  window._shadowBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
 
   function _isSttEnabled() {
     return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
@@ -3948,9 +3956,9 @@ function startOdysseusApp() {
         if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
         // Fire any URL route opener now that sessions + module wiring are
         // ready. Deferred from up top of init for exactly this reason.
-        if (window._odysseusRouteOpener) {
-          try { window._odysseusRouteOpener(); } catch (_) {}
-          window._odysseusRouteOpener = null;
+        if (window._shadowRouteOpener) {
+          try { window._shadowRouteOpener(); } catch (_) {}
+          window._shadowRouteOpener = null;
         }
       });
   } else {
@@ -3977,7 +3985,7 @@ function startOdysseusApp() {
   
   // Ensure proper initial state
   voiceRecorderModule.init();
-  shadowHudModule.init();
+  commandPageModule.init();
   if (censorModule) censorModule.init();
 
   // Auto-focus message input on load
@@ -4110,7 +4118,7 @@ function startOdysseusApp() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startOdysseusApp, { once: true });
+  document.addEventListener('DOMContentLoaded', startShadowApp, { once: true });
 } else {
-  startOdysseusApp();
+  startShadowApp();
 }

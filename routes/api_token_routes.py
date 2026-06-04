@@ -53,7 +53,7 @@ def setup_api_token_routes() -> APIRouter:
             raise HTTPException(400, "Token name is required")
         owner = get_current_user(request)
 
-        raw_token = "ody_" + secrets.token_urlsafe(32)
+        raw_token = "shd_" + secrets.token_urlsafe(32)
         token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt()).decode()
         token_id = str(uuid.uuid4())[:8]
 

@@ -23,7 +23,7 @@ these extension points instead of duplicating working subsystems.
 - `core/middleware.py` owns security headers and the loopback-only internal-tool
   token used by the in-process agent bridge.
 - `src/secret_storage.py` encrypts configured secrets at rest with Fernet.
-- `routes/api_token_routes.py` mints scoped `ody_` API tokens. The `ody_`
+- `routes/api_token_routes.py` mints scoped `shd_` API tokens. The `shd_`
   prefix remains as a compatibility identifier even though the visible product
   is Shadow.
 
@@ -77,9 +77,9 @@ these extension points instead of duplicating working subsystems.
 
 ## Shadow Extension Boundaries
 
-- Visible branding changes to `Shadow`. Internal compatibility identifiers
-  such as `ODYSSEUS_*` env variables, `ody_` tokens, `odysseus_session`,
-  `X-Odysseus-*` headers, and local-storage keys remain stable unless a
+- Branding is `Shadow` throughout. Internal identifiers
+  such as `SHADOW_*` env variables, `shd_` tokens, `shadow_session`,
+  `X-Shadow-*` headers, and local-storage keys remain stable unless a
   migration is added.
 - Home-PC control is a separate allowlisted companion service intended for a
   private Tailscale link. The VPS must never expose a general-purpose home

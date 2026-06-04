@@ -1,5 +1,5 @@
 services:
-  odysseus:
+  shadow:
     build: .
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
@@ -13,7 +13,7 @@ services:
       # container, so persist its HuggingFace cache under ./data/huggingface.
       - ./data/huggingface:/app/.cache/huggingface:z
       # Cookbook-installed Python CLIs/packages (vLLM, llama-cpp-python, etc.)
-      # land under /app/.local for the odysseus user. Persist them so a
+      # land under /app/.local for the shadow user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ./data/local:/app/.local:z
     extra_hosts:
@@ -39,8 +39,8 @@ services:
       - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
       - SHADOW_HOME_AGENT_ALLOW_PUBLIC=${SHADOW_HOME_AGENT_ALLOW_PUBLIC:-false}
       - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
-      - ODYSSEUS_ADMIN_USER=${ODYSSEUS_ADMIN_USER:-admin}
-      - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
+      - SHADOW_ADMIN_USER=${SHADOW_ADMIN_USER:-admin}
+      - SHADOW_ADMIN_PASSWORD=${SHADOW_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       - SECURE_COOKIES=${SECURE_COOKIES:-false}
       - EMBEDDING_URL=${EMBEDDING_URL:-}
@@ -48,9 +48,9 @@ services:
       - FASTEMBED_MODEL=${FASTEMBED_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       - FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}
       - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
-      - ODYSSEUS_INPROCESS_POLLERS=${ODYSSEUS_INPROCESS_POLLERS:-1}
-      - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
-      - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
+      - SHADOW_INPROCESS_POLLERS=${SHADOW_INPROCESS_POLLERS:-1}
+      - SHADOW_INPROCESS_TASKS=${SHADOW_INPROCESS_TASKS:-1}
+      - SHADOW_SCRIPT_HOST=${SHADOW_SCRIPT_HOST:-localhost}
       - DATA_BRAVE_API_KEY=${DATA_BRAVE_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}
@@ -82,15 +82,13 @@ services:
     environment:
       - SHADOW_TELEGRAM_BOT_TOKEN=${SHADOW_TELEGRAM_BOT_TOKEN:-}
       - SHADOW_TELEGRAM_ALLOWED_USER_IDS=${SHADOW_TELEGRAM_ALLOWED_USER_IDS:-}
-      - SHADOW_APP_URL=http://odysseus:7000
-      - SHADOW_APP_API_TOKEN=${SHADOW_APP_API_TOKEN:-}
       - SHADOW_HOME_AGENT_URL=${SHADOW_HOME_AGENT_URL:-}
       - SHADOW_HOME_AGENT_SOCKET=${SHADOW_HOME_AGENT_SOCKET:-}
       - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
       - SHADOW_HOME_AGENT_ALLOW_PUBLIC=${SHADOW_HOME_AGENT_ALLOW_PUBLIC:-false}
       - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
     depends_on:
-      - odysseus
+      - shadow
     restart: unless-stopped
 
   chromadb:
@@ -110,7 +108,7 @@ services:
       - -c
       - |
         set -eu
-        if [ ! -s /etc/searxng/settings.yml ] || grep -q 'odysseus-local-searxng-json-2026-05-30\|__SEARXNG_SECRET__' /etc/searxng/settings.yml; then
+        if [ ! -s /etc/searxng/settings.yml ] || grep -q 'shadow-local-searxng-json-2026-05-30\|__SEARXNG_SECRET__' /etc/searxng/settings.yml; then
           secret="$${SEARXNG_SECRET:-}"
           if [ -z "$$secret" ]; then
             secret="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
@@ -157,6 +155,14 @@ services:
       - ntfy-cache:/var/cache/ntfy
     environment:
       - NTFY_BASE_URL=${NTFY_BASE_URL:-http://localhost:8091}
+    restart: unless-stopped
+
+  # PO-token provider for the music player. YouTube challenges datacenter IPs
+  # with a "confirm you're not a bot" check; yt-dlp's bgutil plugin (installed
+  # in the app image) fetches PO tokens from this helper to get past it. No
+  # Google account needed. Reachable from the app as http://bgutil-pot:4416.
+  bgutil-pot:
+    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:latest
     restart: unless-stopped
 
 volumes:

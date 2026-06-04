@@ -70,7 +70,7 @@ from core.middleware import require_admin  # noqa: E402
 
 def test_mint_token_returns_raw_once_and_stores_only_a_hash():
     token_id, raw = P.mint_token("alice")
-    assert raw.startswith("ody_")
+    assert raw.startswith("shd_")
     # The persisted row stores a bcrypt hash + prefix, never the plaintext.
     assert _CAPTURED["token_hash"] != raw
     assert _CAPTURED["token_hash"].startswith("$2")  # bcrypt
@@ -83,22 +83,22 @@ def test_mint_token_returns_raw_once_and_stores_only_a_hash():
 def test_mint_pairing_token_invalidates_cache(monkeypatch):
     # The mint must flip the auth middleware's cache so the token works on the
     # very next request, with no restart.
-    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "ody_demo"))
+    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "shd_demo"))
     invalidate = MagicMock()
     token_id, raw = mint_pairing_token("alice", invalidate)
-    assert (token_id, raw) == ("id1", "ody_demo")
+    assert (token_id, raw) == ("id1", "shd_demo")
     invalidate.assert_called_once()
 
 
 def test_mint_pairing_token_tolerates_no_invalidator(monkeypatch):
-    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "ody_demo"))
+    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "shd_demo"))
     # Must not blow up if the app didn't expose an invalidator.
-    assert mint_pairing_token("alice", None) == ("id1", "ody_demo")
+    assert mint_pairing_token("alice", None) == ("id1", "shd_demo")
 
 
 def test_pairing_payload_shape():
-    p = P.pairing_payload("192.168.1.9", 7000, "ody_x")
-    assert p == {"v": 1, "host": "192.168.1.9", "port": 7000, "token": "ody_x"}
+    p = P.pairing_payload("192.168.1.9", 7000, "shd_x")
+    assert p == {"v": 1, "host": "192.168.1.9", "port": 7000, "token": "shd_x"}
 
 
 # --- admin-only gate: a bearer/non-admin caller is rejected ----------------

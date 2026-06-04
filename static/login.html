@@ -20,7 +20,7 @@
   };
   var THEME_DEFAULT_INTENSITY = { midnight:0.5, terminal:0.8, organs:0.65 };
   try {
-    var t = JSON.parse(localStorage.getItem('odysseus-theme'));
+    var t = JSON.parse(localStorage.getItem('shadow-theme'));
     var s = document.documentElement.style;
     if (t && t.colors) {
       var c = t.colors;
@@ -85,7 +85,7 @@
   @font-face { font-family: 'Fira Code'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/FiraCode-Regular.woff2') format('woff2'); }
   @font-face { font-family: 'Fira Code'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/FiraCode-SemiBold.woff2') format('woff2'); }
   /* Mirror the main app's :root defaults (static/style.css ~line 18) so an
-     uncustomized theme — or a fresh browser with no `odysseus-theme` in
+     uncustomized theme — or a fresh browser with no `shadow-theme` in
      localStorage — renders the login page in the same palette as the rest
      of the app instead of a different greys+offwhite scheme. */
   :root {
@@ -300,7 +300,7 @@
 
   // Prefill last username
   const usernameInput = document.getElementById('username');
-  const savedUser = localStorage.getItem('odysseus-last-user');
+  const savedUser = localStorage.getItem('shadow-last-user');
   if (savedUser && usernameInput) {
     usernameInput.value = savedUser;
     document.getElementById('password').focus();
@@ -447,9 +447,9 @@
     const remember = document.getElementById('remember').checked;
     function finishLogin() {
       const _rem = document.getElementById('remember').checked;
-      if (_rem) localStorage.setItem('odysseus-last-user', username);
-      else localStorage.removeItem('odysseus-last-user');
-      sessionStorage.removeItem('ody-session-active');
+      if (_rem) localStorage.setItem('shadow-last-user', username);
+      else localStorage.removeItem('shadow-last-user');
+      sessionStorage.removeItem('shd-session-active');
       submitBtn.innerHTML = '<span class="login-spinner" aria-hidden="true"></span>';
       submitBtn.disabled = true;
       Promise.all([
@@ -457,9 +457,9 @@
         fetch('/api/auth/features', { credentials: 'same-origin' }).then(r => r.json()),
         fetch('/api/auth/settings', { credentials: 'same-origin' }).then(r => r.json()),
       ]).then(([sess, feat, sett]) => {
-        sessionStorage.setItem('ody-prefetch-sessions', JSON.stringify(sess));
-        sessionStorage.setItem('ody-prefetch-features', JSON.stringify(feat));
-        sessionStorage.setItem('ody-prefetch-settings', JSON.stringify(sett));
+        sessionStorage.setItem('shd-prefetch-sessions', JSON.stringify(sess));
+        sessionStorage.setItem('shd-prefetch-features', JSON.stringify(feat));
+        sessionStorage.setItem('shd-prefetch-settings', JSON.stringify(sett));
       }).catch(() => {}).finally(() => { window.location.replace('/'); });
     }
     async function doLogin(totpCode) {

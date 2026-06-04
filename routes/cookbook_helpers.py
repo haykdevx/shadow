@@ -442,22 +442,22 @@ def _validate_serve_cmd(v: str | None) -> str | None:
 
 def _append_serve_preflight_exit_lines(runner_lines: list[str], *, keep_shell_open: bool) -> None:
     """Append serve-runner lines that surface preflight failures before exit."""
-    runner_lines.append('if [ -n "$ODYSSEUS_PREFLIGHT_EXIT" ]; then')
-    runner_lines.append('  echo ""; echo "=== Process exited with code $ODYSSEUS_PREFLIGHT_EXIT ==="')
+    runner_lines.append('if [ -n "$SHADOW_PREFLIGHT_EXIT" ]; then')
+    runner_lines.append('  echo ""; echo "=== Process exited with code $SHADOW_PREFLIGHT_EXIT ==="')
     if keep_shell_open:
         runner_lines.append('  exec "${SHELL:-/bin/bash}"')
     else:
-        runner_lines.append('  exit "$ODYSSEUS_PREFLIGHT_EXIT"')
+        runner_lines.append('  exit "$SHADOW_PREFLIGHT_EXIT"')
     runner_lines.append('fi')
 
 
 def _append_serve_exit_code_lines(runner_lines: list[str], *, keep_shell_open: bool) -> None:
     """Append serve-runner lines that preserve and report the command exit code."""
-    runner_lines.append('ODYSSEUS_CMD_EXIT=$?')
+    runner_lines.append('SHADOW_CMD_EXIT=$?')
     if keep_shell_open:
-        runner_lines.append('echo ""; echo "=== Process exited with code $ODYSSEUS_CMD_EXIT ==="; exec "${SHELL:-/bin/bash}"')
+        runner_lines.append('echo ""; echo "=== Process exited with code $SHADOW_CMD_EXIT ==="; exec "${SHELL:-/bin/bash}"')
     else:
-        runner_lines.append('echo ""; echo "=== Process exited with code $ODYSSEUS_CMD_EXIT ==="')
+        runner_lines.append('echo ""; echo "=== Process exited with code $SHADOW_CMD_EXIT ==="')
 
 
 class ModelDownloadRequest(BaseModel):
@@ -607,4 +607,4 @@ def _ssh_ps(host, script_path, port=None):
 
 
 # Windows session dir — stored in user's temp on the remote
-WIN_SESSION_DIR = "$env:TEMP\\\\odysseus-sessions"
+WIN_SESSION_DIR = "$env:TEMP\\\\shadow-sessions"

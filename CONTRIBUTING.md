@@ -11,11 +11,12 @@ Thanks for helping. The project is moving quickly, so the best contributions are
 
 ## Setup
 
-Docker is the recommended path for normal testing:
+Docker is the recommended path for normal testing. Demo mode is the preferred way to review Command dashboard UI without linking a real PC: set `SHADOW_DEMO_MODE=true` in `.env`.
+
 
 ```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd odysseus
+git clone https://github.com/haykdevx/dev.git
+cd shadow
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -36,6 +37,7 @@ Windows is not actively tested. Docker on Linux or a Linux/macOS manual install 
 Run the smallest relevant checks for your change:
 
 ```bash
+python scripts/public_readiness_check.py
 python -m pytest
 python -m py_compile app.py routes/*.py src/*.py
 node --check static/js/<file-you-changed>.js
@@ -46,7 +48,7 @@ For Docker-related changes:
 ```bash
 docker compose config
 docker compose up -d --build
-docker compose logs --tail=120 odysseus
+docker compose logs --tail=120 shadow
 ```
 
 Mention what you ran in the pull request description. If you could not run a check, say so.

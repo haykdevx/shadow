@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import platform
+import signal
 import shlex
 import shutil
 import subprocess
@@ -18,8 +19,34 @@ from socketserver import ThreadingMixIn, UnixStreamServer
 from pathlib import Path
 from typing import Any
 
-READ_ACTIONS = frozenset({"status", "processes", "screenshot", "clipboard_get"})
-WRITE_ACTIONS = frozenset({"clipboard_set", "media", "volume", "app_launch", "app_focus", "app_close", "lock", "type_text", "keypress"})
+READ_ACTIONS = frozenset({
+    "status",
+    "processes",
+    "screenshot",
+    "clipboard_get",
+    "windows",
+    "file_list",
+    "file_read",
+    "file_search",
+})
+WRITE_ACTIONS = frozenset({
+    "clipboard_set",
+    "media",
+    "volume",
+    "app_launch",
+    "app_focus",
+    "app_close",
+    "kill_process",
+    "shell",
+    "file_write",
+    "lock",
+    "sleep",
+    "shutdown",
+    "type_text",
+    "keypress",
+    "mouse_move",
+    "mouse_click",
+})
 ALL_ACTIONS = READ_ACTIONS | WRITE_ACTIONS
 
 
@@ -90,6 +117,9 @@ def _clipboard_set(text: str) -> dict[str, Any]:
     raise HomeAgentError("; ".join(errors) or "Install wl-clipboard, xclip, or xsel")
 
 
+_CPU_LAST: tuple[int, int] | None = None
+
+
 def _mem_info() -> dict[str, int]:
     values: dict[str, int] = {}
     try:
@@ -101,6 +131,86 @@ def _mem_info() -> dict[str, int]:
     total = values.get("MemTotal", 0)
     available = values.get("MemAvailable", 0)
     return {"total": total, "used": max(0, total - available), "available": available}
+
+
+def _cpu_percent() -> float | None:
+    global _CPU_LAST
+    try:
+        parts = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0].split()[1:]
+        values = [int(part) for part in parts]
+    except (OSError, ValueError, IndexError):
+        return None
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    total = sum(values)
+    previous = _CPU_LAST
+    _CPU_LAST = (total, idle)
+    if previous is None:
+        return None
+    total_delta = total - previous[0]
+    idle_delta = idle - previous[1]
+    if total_delta <= 0:
+        return None
+    return round(max(0.0, min(100.0, 100.0 * (1.0 - (idle_delta / total_delta)))), 1)
+
+
+def _network_info() -> dict[str, Any]:
+    interfaces = []
+    rx_total = 0
+    tx_total = 0
+    try:
+        lines = Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]
+    except OSError:
+        return {"interfaces": [], "rx_bytes": 0, "tx_bytes": 0}
+    for line in lines:
+        name, _, rest = line.partition(":")
+        iface = name.strip()
+        if not iface or iface == "lo":
+            continue
+        cols = rest.split()
+        if len(cols) < 16:
+            continue
+        try:
+            rx = int(cols[0])
+            tx = int(cols[8])
+        except ValueError:
+            continue
+        rx_total += rx
+        tx_total += tx
+        interfaces.append({"name": iface, "rx_bytes": rx, "tx_bytes": tx})
+    return {"interfaces": interfaces, "rx_bytes": rx_total, "tx_bytes": tx_total}
+
+
+def _gpu_info() -> list[dict[str, Any]]:
+    if shutil.which("nvidia-smi") is None:
+        return []
+    query = "name,utilization.gpu,memory.used,memory.total,temperature.gpu"
+    try:
+        output = _run([
+            "nvidia-smi",
+            f"--query-gpu={query}",
+            "--format=csv,noheader,nounits",
+        ], timeout=5)
+    except HomeAgentError:
+        return []
+    gpus = []
+    for row in output.splitlines():
+        parts = [part.strip() for part in row.split(",")]
+        if len(parts) < 5:
+            continue
+        name, util, mem_used, mem_total, temp = parts[:5]
+        def num(value: str) -> float | None:
+            try:
+                return float(value)
+            except ValueError:
+                return None
+        gpus.append({
+            "name": name,
+            "util_percent": num(util),
+            "memory_used_mib": num(mem_used),
+            "memory_total_mib": num(mem_total),
+            "temp_c": num(temp),
+        })
+    return gpus
 
 
 def _status() -> dict[str, Any]:
@@ -117,10 +227,14 @@ def _status() -> dict[str, Any]:
         "ok": True,
         "hostname": platform.node(),
         "platform": platform.platform(),
+        "os": {"system": platform.system(), "release": platform.release()},
         "uptime_seconds": round(uptime),
         "load": load,
+        "cpu": {"percent": _cpu_percent(), "count": os.cpu_count()},
         "memory": _mem_info(),
         "disk": {"total": disk.total, "used": disk.used, "free": disk.free},
+        "network": _network_info(),
+        "gpu": _gpu_info(),
     }
 
 
@@ -128,6 +242,25 @@ def _processes(args: dict[str, Any]) -> dict[str, Any]:
     limit = max(1, min(int(args.get("limit", 15)), 50))
     output = _run(["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"], timeout=5)
     return {"ok": True, "processes": output.splitlines()[: limit + 1]}
+
+
+def _windows() -> dict[str, Any]:
+    output = _run(["wmctrl", "-lpx"], timeout=5)
+    windows = []
+    for line in output.splitlines():
+        parts = line.split(None, 5)
+        if len(parts) < 6:
+            continue
+        wid, desktop, pid, wm_class, host, title = parts
+        windows.append({
+            "id": wid,
+            "desktop": desktop,
+            "pid": pid,
+            "class": wm_class,
+            "host": host,
+            "title": title,
+        })
+    return {"ok": True, "windows": windows}
 
 
 def _screenshot() -> dict[str, Any]:
@@ -149,9 +282,12 @@ def _screenshot() -> dict[str, Any]:
                 _run(argv, timeout=12)
                 if path.exists() and path.stat().st_size:
                     mime = mimetypes.guess_type(str(path))[0] or "image/png"
+                    width, height = _png_size(path)
                     return {
                         "ok": True,
                         "mime": mime,
+                        "width": width,
+                        "height": height,
                         "image_b64": base64.b64encode(path.read_bytes()).decode("ascii"),
                     }
             except HomeAgentError as exc:
@@ -159,6 +295,16 @@ def _screenshot() -> dict[str, Any]:
         raise HomeAgentError("; ".join(errors) or "Install grim, gnome-screenshot, spectacle, or ImageMagick import")
     finally:
         path.unlink(missing_ok=True)
+
+
+def _png_size(path: Path) -> tuple[int | None, int | None]:
+    try:
+        header = path.read_bytes()[:24]
+    except OSError:
+        return None, None
+    if len(header) >= 24 and header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+    return None, None
 
 
 def _parse_apps() -> dict[str, list[str]]:
@@ -177,6 +323,175 @@ def _need_text(args: dict[str, Any], key: str, *, limit: int = 4000) -> str:
     return value[:limit]
 
 
+def _allowed_roots() -> list[Path]:
+    raw = os.getenv("SHADOW_ALLOWED_ROOTS", "").strip()
+    items = [item.strip() for item in raw.split(os.pathsep) if item.strip()] if raw else [str(Path.home())]
+    roots: list[Path] = []
+    for item in items:
+        try:
+            root = Path(os.path.expanduser(item)).resolve(strict=False)
+        except OSError:
+            continue
+        if root.exists() and root.is_dir():
+            roots.append(root)
+    return roots or [Path.home().resolve(strict=False)]
+
+
+def _resolve_allowed(value: str | None = None, *, must_exist: bool = True) -> Path:
+    roots = _allowed_roots()
+    raw = str(value or roots[0])
+    try:
+        path = Path(os.path.expanduser(raw)).resolve(strict=must_exist)
+    except FileNotFoundError:
+        path = Path(os.path.expanduser(raw)).resolve(strict=False)
+    except OSError as exc:
+        raise HomeAgentError(f"Invalid path: {exc}") from exc
+    for root in roots:
+        if path == root or root in path.parents:
+            return path
+    raise HomeAgentError("Path is outside SHADOW_ALLOWED_ROOTS")
+
+
+def _file_entry(path: Path) -> dict[str, Any]:
+    try:
+        st = path.stat()
+    except OSError:
+        return {"name": path.name, "path": str(path), "error": "unreadable"}
+    return {
+        "name": path.name or str(path),
+        "path": str(path),
+        "type": "dir" if path.is_dir() else "file",
+        "size": st.st_size,
+        "modified": int(st.st_mtime),
+    }
+
+
+def _file_list(args: dict[str, Any]) -> dict[str, Any]:
+    path = _resolve_allowed(str(args.get("path") or ""), must_exist=True)
+    if not path.is_dir():
+        raise HomeAgentError("Path is not a directory")
+    limit = max(1, min(int(args.get("limit", 160)), 400))
+    try:
+        entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))[:limit]
+    except OSError as exc:
+        raise HomeAgentError(f"Cannot list directory: {exc}") from exc
+    return {"ok": True, "path": str(path), "roots": [str(root) for root in _allowed_roots()], "entries": [_file_entry(item) for item in entries]}
+
+
+def _file_read(args: dict[str, Any]) -> dict[str, Any]:
+    path = _resolve_allowed(_need_text(args, "path", limit=4096), must_exist=True)
+    if not path.is_file():
+        raise HomeAgentError("Path is not a file")
+    max_bytes = max(1_000, min(int(args.get("max_bytes", 200_000)), 1_000_000))
+    data = path.read_bytes()[:max_bytes]
+    binary = b"\x00" in data
+    text = "" if binary else data.decode("utf-8", errors="replace")
+    return {
+        "ok": True,
+        "path": str(path),
+        "name": path.name,
+        "size": path.stat().st_size,
+        "truncated": path.stat().st_size > len(data),
+        "binary": binary,
+        "text": text,
+        "mime": mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+    }
+
+
+def _file_search(args: dict[str, Any]) -> dict[str, Any]:
+    base = _resolve_allowed(str(args.get("path") or ""), must_exist=True)
+    if not base.is_dir():
+        raise HomeAgentError("Search path is not a directory")
+    query = _need_text(args, "query", limit=120).lower()
+    limit = max(1, min(int(args.get("limit", 50)), 100))
+    visited = 0
+    results = []
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not d.startswith(".")][:80]
+        for name in dirs + files:
+            visited += 1
+            if visited > 6000:
+                return {"ok": True, "path": str(base), "query": query, "truncated": True, "results": results}
+            if query in name.lower():
+                results.append(_file_entry(Path(root) / name))
+                if len(results) >= limit:
+                    return {"ok": True, "path": str(base), "query": query, "truncated": False, "results": results}
+    return {"ok": True, "path": str(base), "query": query, "truncated": False, "results": results}
+
+
+def _file_write(args: dict[str, Any]) -> dict[str, Any]:
+    path = _resolve_allowed(_need_text(args, "path", limit=4096), must_exist=False)
+    text = str(args.get("text") or "")
+    if len(text.encode("utf-8")) > 1_000_000:
+        raise HomeAgentError("File write is limited to 1 MB")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return {"ok": True, "path": str(path), "bytes": len(text.encode("utf-8"))}
+
+
+def _shell(args: dict[str, Any]) -> dict[str, Any]:
+    command = _need_text(args, "command", limit=4000)
+    cwd = _resolve_allowed(str(args.get("cwd") or ""), must_exist=True)
+    if not cwd.is_dir():
+        raise HomeAgentError("Shell cwd is not a directory")
+    timeout = max(1, min(int(args.get("timeout", 20)), 60))
+    try:
+        proc = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HomeAgentError(f"Command timed out after {timeout}s") from exc
+    output = (proc.stdout or "")[-12000:]
+    error = (proc.stderr or "")[-12000:]
+    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "stdout": output, "stderr": error, "cwd": str(cwd)}
+
+
+def _kill_process(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        pid = int(args.get("pid"))
+    except (TypeError, ValueError) as exc:
+        raise HomeAgentError("pid must be an integer") from exc
+    if pid <= 1 or pid == os.getpid():
+        raise HomeAgentError("Refusing to kill a protected process")
+    sig_name = str(args.get("signal") or "TERM").upper()
+    sig = signal.SIGKILL if sig_name == "KILL" else signal.SIGTERM
+    os.kill(pid, sig)
+    return {"ok": True, "pid": pid, "signal": sig.name}
+
+
+def _mouse_coordinates(args: dict[str, Any]) -> tuple[int, int]:
+    try:
+        x = int(float(args.get("x")))
+        y = int(float(args.get("y")))
+    except (TypeError, ValueError) as exc:
+        raise HomeAgentError("x and y must be numbers") from exc
+    if not (0 <= x <= 10000 and 0 <= y <= 10000):
+        raise HomeAgentError("mouse coordinates are outside the safety bounds")
+    return x, y
+
+
+def _mouse_move(args: dict[str, Any]) -> dict[str, Any]:
+    x, y = _mouse_coordinates(args)
+    _run(["xdotool", "mousemove", str(x), str(y)])
+    return {"ok": True, "x": x, "y": y}
+
+
+def _mouse_click(args: dict[str, Any]) -> dict[str, Any]:
+    button = max(1, min(int(args.get("button", 1)), 5))
+    if args.get("x") is not None and args.get("y") is not None:
+        x, y = _mouse_coordinates(args)
+        _run(["xdotool", "mousemove", str(x), str(y)])
+    else:
+        x = y = None
+    _run(["xdotool", "click", str(button)])
+    return {"ok": True, "button": button, "x": x, "y": y}
+
+
 def execute_action(action: str, args: Any = None, *, confirmed: bool = False) -> dict[str, Any]:
     action = str(action or "").strip().lower()
     if action not in ALL_ACTIONS:
@@ -189,6 +504,14 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         return _status()
     if action == "processes":
         return _processes(args)
+    if action == "windows":
+        return _windows()
+    if action == "file_list":
+        return _file_list(args)
+    if action == "file_read":
+        return _file_read(args)
+    if action == "file_search":
+        return _file_search(args)
     if action == "screenshot":
         return _screenshot()
     if action == "clipboard_get":
@@ -196,8 +519,20 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         return {"ok": True, "text": text[:100_000]}
     if action == "clipboard_set":
         return _clipboard_set(str(args.get("text") or "")[:100_000])
+    if action == "kill_process":
+        return _kill_process(args)
+    if action == "shell":
+        return _shell(args)
+    if action == "file_write":
+        return _file_write(args)
     if action == "lock":
         _run_first([["loginctl", "lock-session"], ["gnome-screensaver-command", "-l"], ["xdg-screensaver", "lock"]])
+        return {"ok": True}
+    if action == "sleep":
+        _run_first([["systemctl", "suspend"], ["loginctl", "suspend"]])
+        return {"ok": True}
+    if action == "shutdown":
+        _run_first([["systemctl", "poweroff"], ["loginctl", "poweroff"]])
         return {"ok": True}
     if action == "type_text":
         _run(["xdotool", "type", "--clearmodifiers", "--", _need_text(args, "text")])
@@ -208,6 +543,10 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
             raise HomeAgentError("keypress contains unsupported characters")
         _run(["xdotool", "key", "--clearmodifiers", key])
         return {"ok": True}
+    if action == "mouse_move":
+        return _mouse_move(args)
+    if action == "mouse_click":
+        return _mouse_click(args)
     if action == "media":
         command = _need_text(args, "command", limit=20).lower()
         if command not in {"play", "pause", "play-pause", "next", "previous", "stop"}:
@@ -229,6 +568,10 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, start_new_session=True)
         return {"ok": True, "app": app}
     if action in {"app_focus", "app_close"}:
+        wid = str(args.get("id") or "").strip()
+        if wid.startswith("0x") and all(ch in "0123456789abcdefABCDEFx" for ch in wid):
+            _run(["wmctrl", "-ia" if action == "app_focus" else "-ic", wid])
+            return {"ok": True, "id": wid}
         title = _need_text(args, "title", limit=120)
         _run(["wmctrl", "-a" if action == "app_focus" else "-c", title])
         return {"ok": True, "title": title}
@@ -270,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 150_000:
+            if length <= 0 or length > 1_200_000:
                 raise HomeAgentError("Invalid request size")
             payload = json.loads(self.rfile.read(length))
             result = execute_action(payload.get("action"), payload.get("args"), confirmed=payload.get("confirmed") is True)

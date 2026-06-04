@@ -1,4 +1,4 @@
-# Copy to /etc/systemd/system/odysseus-ui.service
+# Copy to /etc/systemd/system/shadow-ui.service
 # Edit User, WorkingDirectory, and ExecStart paths to match your setup
 [Unit]
 Description=Shadow UI
@@ -8,11 +8,11 @@ After=network.target
 Type=simple
 # CHANGE THESE to match your user and install path:
 User=YOURUSER
-WorkingDirectory=/home/YOURUSER/odysseus-ui
-ExecStart=/home/YOURUSER/odysseus-ui/venv/bin/uvicorn app:app --port 8000 --host 0.0.0.0
+WorkingDirectory=/home/YOURUSER/shadow-ui
+ExecStart=/home/YOURUSER/shadow-ui/venv/bin/uvicorn app:app --port 8000 --host 0.0.0.0
 Restart=always
 RestartSec=3
-EnvironmentFile=-/home/YOURUSER/odysseus-ui/.env
+EnvironmentFile=-/home/YOURUSER/shadow-ui/.env
 
 [Install]
 WantedBy=multi-user.target

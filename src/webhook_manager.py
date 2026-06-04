@@ -192,12 +192,12 @@ class WebhookManager:
         body = json.dumps({"event": event, "timestamp": datetime.utcnow().isoformat(), "data": payload})
         headers = {
             "Content-Type": "application/json",
-            "X-Odysseus-Event": event,
+            "X-Shadow-Event": event,
             "User-Agent": "Shadow-Webhook/1.0",
         }
         if secret:
             sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-            headers["X-Odysseus-Signature"] = sig
+            headers["X-Shadow-Signature"] = sig
 
         db = SessionLocal()
         try:

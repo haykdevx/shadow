@@ -21,6 +21,7 @@ import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
+import magiModule from './magi.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -183,7 +184,7 @@ import createResearchSynapse from './researchSynapse.js';
       // Clear any pending transitions from + → arrow swap
       submitBtn.classList.remove('anim-spin', 'anim-spin-swap', 'anim-land', 'mic-mode', 'newchat-mode', 'newchat-expanded', 'recording');
       // Ensure arrow icon is showing before launch
-      var icons = window._odysseusBtnIcons;
+      var icons = window._shadowBtnIcons;
       if (icons) submitBtn.innerHTML = icons.send;
       void submitBtn.offsetWidth;
       // Arrow launches up, then stop icon lands in
@@ -214,7 +215,7 @@ import createResearchSynapse from './researchSynapse.js';
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
       } else {
-        var icons = window._odysseusBtnIcons;
+        var icons = window._shadowBtnIcons;
         submitBtn.innerHTML = icons ? icons.send : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
         submitBtn.title = 'Send message';
         submitBtn.classList.remove('mic-mode', 'newchat-mode');
@@ -447,10 +448,10 @@ import createResearchSynapse from './researchSynapse.js';
           const dcRes = await fetch('/api/default-chat');
           dc = await dcRes.json();
           if (dc && dc.endpoint_url && dc.model) {
-            try { window.__odysseusDefaultChat = dc; } catch (_) {}
+            try { window.__shadowDefaultChat = dc; } catch (_) {}
           }
         } catch (_) {
-          dc = (typeof window !== 'undefined' && window.__odysseusDefaultChat) || null;
+          dc = (typeof window !== 'undefined' && window.__shadowDefaultChat) || null;
         }
         if (dc.endpoint_url && dc.model) {
           await sessionModule.createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
@@ -504,7 +505,7 @@ import createResearchSynapse from './researchSynapse.js';
 
     // Acquire Web Lock to hint browser not to discard this tab while streaming
     if (navigator.locks) {
-      navigator.locks.request('odysseus-stream-' + streamSessionId, { mode: 'exclusive', ifAvailable: true }, lock => {
+      navigator.locks.request('shadow-stream-' + streamSessionId, { mode: 'exclusive', ifAvailable: true }, lock => {
         if (!lock) return; // Another stream already holds a lock — fine
         return new Promise(resolve => { _webLockRelease = resolve; });
       }).catch(e => console.warn('web lock acquire failed:', e)); // Ignore lock errors — best-effort
@@ -730,6 +731,25 @@ import createResearchSynapse from './researchSynapse.js';
       let _finalMsgWithInject = finalMsg;
       if (_inject.prefix) _finalMsgWithInject = _inject.prefix + ' ' + _finalMsgWithInject;
       if (_inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
+
+      if (magiModule && magiModule.isActive && magiModule.isActive()) {
+        if (ids.length) {
+          addMessage('assistant', 'MAGI deliberation is text-only for now. Disable MAGI mode to send attachments through normal chat.');
+          updateSubmitButton('idle', submitBtn);
+          if (messageInput) messageInput.disabled = false;
+          return;
+        }
+        await magiModule.runDeliberation({
+          query: _finalMsgWithInject,
+          displayQuery: userDisplay,
+          sessionId: streamSessionId,
+        });
+        updateSubmitButton('idle', submitBtn);
+        if (messageInput) messageInput.disabled = false;
+        currentAccumulated = '';
+        currentHolder = null;
+        return;
+      }
 
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
@@ -4514,7 +4534,7 @@ import createResearchSynapse from './researchSynapse.js';
   // streaming, history-rendered, compare-mode, all of them. Re-attaching
   // per-node listeners on every innerHTML rewrite was the source of the
   // "needs many clicks" bug.
-  if (!window.__odysseus_thread_click_bound) {
+  if (!window.__shadow_thread_click_bound) {
     document.body.addEventListener('click', (e) => {
       const header = e.target.closest('.agent-thread-header');
       if (!header) return;
@@ -4522,7 +4542,7 @@ import createResearchSynapse from './researchSynapse.js';
       if (!node) return;
       node.classList.toggle('open');
     });
-    window.__odysseus_thread_click_bound = true;
+    window.__shadow_thread_click_bound = true;
   }
 
   export default chatModule;

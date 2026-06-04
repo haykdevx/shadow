@@ -10,13 +10,13 @@
 #
 # This is a *launcher* wrapper: it drives the venv we set up in this repo, it
 # does not bundle Python. The install path is baked into the app at build time,
-# so rebuild if you move the repo. Override the port with ODYSSEUS_PORT.
+# so rebuild if you move the repo. Override the port with SHADOW_PORT.
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="Shadow"
 INSTALL_DIR="$REPO_DIR"
-PORT="${ODYSSEUS_PORT:-7860}"
+PORT="${SHADOW_PORT:-7860}"
 DIST="$REPO_DIR/dist"
 APP="$DIST/$APP_NAME.app"
 
@@ -27,22 +27,22 @@ echo "  port:        $PORT"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# ── Icon (best effort) — center-crop docs/odysseus.jpg to a square .icns ──
-if [ -f "$REPO_DIR/docs/odysseus.jpg" ] && command -v sips >/dev/null 2>&1; then
+# ── Icon (best effort) — center-crop docs/shadow.jpg to a square .icns ──
+if [ -f "$REPO_DIR/docs/shadow.jpg" ] && command -v sips >/dev/null 2>&1; then
   TMPIMG="$(mktemp -d)"
   # Center-crop to a square, scale to 512 (sips' icns encoder caps at 512), and
   # let sips emit the .icns directly — more robust across macOS versions than
   # building an .iconset by hand.
-  sips -c 720 720 "$REPO_DIR/docs/odysseus.jpg" --out "$TMPIMG/sq.png" >/dev/null 2>&1 || cp "$REPO_DIR/docs/odysseus.jpg" "$TMPIMG/sq.png"
+  sips -c 720 720 "$REPO_DIR/docs/shadow.jpg" --out "$TMPIMG/sq.png" >/dev/null 2>&1 || cp "$REPO_DIR/docs/shadow.jpg" "$TMPIMG/sq.png"
   sips -z 512 512 "$TMPIMG/sq.png" --out "$TMPIMG/icon.png" >/dev/null 2>&1
-  if sips -s format icns "$TMPIMG/icon.png" --out "$APP/Contents/Resources/odysseus.icns" >/dev/null 2>&1; then
-    echo "  icon:        odysseus.icns"
+  if sips -s format icns "$TMPIMG/icon.png" --out "$APP/Contents/Resources/shadow.icns" >/dev/null 2>&1; then
+    echo "  icon:        shadow.icns"
   else
     echo "  icon:        (skipped — conversion failed)"
   fi
   rm -rf "$TMPIMG"
 else
-  echo "  icon:        (skipped — no docs/odysseus.jpg)"
+  echo "  icon:        (skipped — no docs/shadow.jpg)"
 fi
 
 # ── Info.plist ──
@@ -53,12 +53,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key>            <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>     <string>$APP_NAME</string>
-    <key>CFBundleIdentifier</key>      <string>com.odysseus.launcher</string>
+    <key>CFBundleIdentifier</key>      <string>com.shadow.launcher</string>
     <key>CFBundleVersion</key>         <string>1.0</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
-    <key>CFBundleIconFile</key>        <string>odysseus</string>
+    <key>CFBundleIconFile</key>        <string>shadow</string>
     <key>LSMinimumSystemVersion</key>  <string>11.0</string>
     <key>NSHighResolutionCapable</key> <true/>
     <key>LSUIElement</key>             <false/>
@@ -76,7 +76,7 @@ URL="http://127.0.0.1:${PORT}"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 UVICORN="$INSTALL_DIR/venv/bin/uvicorn"
-LOG="$INSTALL_DIR/logs/odysseus-app.log"
+LOG="$INSTALL_DIR/logs/shadow-app.log"
 
 notify() { /usr/bin/osascript -e "display notification \"$1\" with title \"Shadow\"" >/dev/null 2>&1; }
 die_gui() {

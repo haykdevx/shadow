@@ -53,7 +53,7 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "ui_control",
 })
 
-COLLECTION_NAME = "odysseus_tool_index"
+COLLECTION_NAME = "shadow_tool_index"
 
 # ── Tool description registry ──
 # Each tool gets a searchable description that helps retrieval.

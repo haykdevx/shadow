@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Telegram remote for Shadow chat and explicitly approved home-PC actions."""
+"""Telegram remote for Shadow PC control only.
+
+No AI chat, no sessions, no general shell. The bridge accepts commands only from
+SHADOW_TELEGRAM_ALLOWED_USER_IDS and routes actions through src.shadow_pc, where
+mutating actions remain approval-gated.
+"""
 
 from __future__ import annotations
 
@@ -20,16 +25,22 @@ from src.shadow_pc import ShadowPcError, cancel_action, confirm_action, list_pen
 
 
 BOT_TOKEN = os.getenv("SHADOW_TELEGRAM_BOT_TOKEN", "").strip()
-APP_URL = os.getenv("SHADOW_APP_URL", "http://127.0.0.1:7000").strip().rstrip("/")
-APP_TOKEN = os.getenv("SHADOW_APP_API_TOKEN", "").strip()
-STATE_PATH = Path(os.getenv("SHADOW_TELEGRAM_STATE", "data/shadow_telegram_sessions.json"))
 TG_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-_STATE_LOCK = threading.Lock()
+HELP = """Shadow PC control
+/status - linked PC status
+/screen - send screenshot
+/lock - request screen lock approval
+/processes - top processes
+/clip get - read clipboard
+/clip set <text> - request clipboard write approval
+/pending - list approvals
+/approve <id> - approve a pending action
+/cancel <id> - cancel a pending action"""
 
 
 def _allowed() -> set[int]:
     values = os.getenv("SHADOW_TELEGRAM_ALLOWED_USER_IDS", "")
-    out = set()
+    out: set[int] = set()
     for value in values.split(","):
         try:
             out.add(int(value.strip()))
@@ -38,45 +49,15 @@ def _allowed() -> set[int]:
     return out
 
 
-def _load_sessions() -> dict[str, str]:
-    try:
-        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _save_sessions(rows: dict[str, str]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(STATE_PATH)
-
-
-def _get_session(chat_id: int) -> str | None:
-    with _STATE_LOCK:
-        return _load_sessions().get(str(chat_id))
-
-
-def _set_session(chat_id: int, session_id: str) -> None:
-    with _STATE_LOCK:
-        sessions = _load_sessions()
-        sessions[str(chat_id)] = session_id
-        _save_sessions(sessions)
-
-
-def _clear_session(chat_id: int) -> None:
-    with _STATE_LOCK:
-        sessions = _load_sessions()
-        sessions.pop(str(chat_id), None)
-        _save_sessions(sessions)
-
-
 def _tg(method: str, *, files: dict[str, Any] | None = None, **params: Any) -> dict[str, Any]:
     try:
         with httpx.Client(timeout=httpx.Timeout(65.0, connect=8.0)) as client:
-            response = client.post(f"{TG_API}/{method}", data=params if files else None, json=None if files else params, files=files)
+            response = client.post(
+                f"{TG_API}/{method}",
+                data=params if files else None,
+                json=None if files else params,
+                files=files,
+            )
             return response.json()
     except (httpx.HTTPError, ValueError) as exc:
         print(f"[shadow-telegram] {method}: {exc}")
@@ -97,7 +78,12 @@ def _send_photo(chat_id: int, payload: dict[str, Any]) -> None:
     raw = base64.b64decode(payload.get("image_b64") or "")
     if not raw:
         raise ShadowPcError("Home PC returned an empty screenshot")
-    _tg("sendPhoto", chat_id=str(chat_id), files={"photo": ("shadow-screen.png", raw, payload.get("mime") or "image/png")})
+    _tg(
+        "sendPhoto",
+        chat_id=str(chat_id),
+        caption="Shadow screen",
+        files={"photo": ("shadow-screen.png", raw, payload.get("mime") or "image/png")},
+    )
 
 
 def _approval_keyboard(pending_id: str) -> dict[str, Any]:
@@ -109,48 +95,69 @@ def _approval_keyboard(pending_id: str) -> dict[str, Any]:
     }
 
 
+def _fmt_status(payload: dict[str, Any]) -> str:
+    memory = payload.get("memory") or {}
+    disk = payload.get("disk") or {}
+    load = payload.get("load") or []
+    lines = [
+        "Shadow PC status",
+        f"Host: {payload.get('hostname') or 'unknown'}",
+        f"Platform: {payload.get('platform') or 'unknown'}",
+        f"Uptime: {int(payload.get('uptime_seconds') or 0)}s",
+    ]
+    if load:
+        lines.append(f"Load: {float(load[0]):.2f}")
+    if memory.get("total"):
+        used_gb = memory.get("used", 0) / (1024 ** 3)
+        total_gb = memory.get("total", 0) / (1024 ** 3)
+        lines.append(f"Memory: {used_gb:.1f}/{total_gb:.1f} GB")
+    if disk.get("total"):
+        free_gb = disk.get("free", 0) / (1024 ** 3)
+        total_gb = disk.get("total", 0) / (1024 ** 3)
+        lines.append(f"Disk free: {free_gb:.1f}/{total_gb:.1f} GB")
+    return "\n".join(lines)
+
+
+def _fmt_pending(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "No pending PC actions."
+    lines = ["Pending PC actions"]
+    now = time.time()
+    for row in rows:
+        ttl = max(0, int(float(row.get("expires_at") or now) - now))
+        lines.append(f"- {row.get('action')}  id={row.get('id')}  expires={ttl}s")
+    return "\n".join(lines)
+
+
 def _propose(chat_id: int, action: str, args: dict[str, Any] | None = None) -> None:
     try:
         result = request_action(action, args or {}, requested_by=f"telegram:{chat_id}")
         pending = result.get("pending")
         if pending:
-            _send(chat_id, f"Approval required: {pending['action']}\nThe action has not executed.", keyboard=_approval_keyboard(pending["id"]))
+            _send(
+                chat_id,
+                f"Approval required: {pending['action']}\nThis has NOT executed.\nid={pending['id']}",
+                keyboard=_approval_keyboard(pending["id"]),
+            )
         else:
             _send(chat_id, json.dumps(result, indent=2, sort_keys=True))
     except ShadowPcError as exc:
         _send(chat_id, f"PC action failed: {exc}")
 
 
-def _chat(chat_id: int, message: str) -> None:
-    if not APP_TOKEN.startswith("ody_"):
-        _send(chat_id, "Shadow chat bridge is not configured.")
-        return
-    session = _get_session(chat_id)
-    body: dict[str, Any] = {"message": message}
-    if session:
-        body["session"] = session
-    try:
-        with httpx.Client(timeout=httpx.Timeout(140.0, connect=8.0)) as client:
-            response = client.post(f"{APP_URL}/api/v1/chat", headers={"Authorization": f"Bearer {APP_TOKEN}"}, json=body)
-            payload = response.json()
-        if response.status_code >= 400:
-            _send(chat_id, f"Shadow chat failed: {payload.get('detail') or payload.get('error') or response.status_code}")
-            return
-        if payload.get("session_id"):
-            _set_session(chat_id, payload["session_id"])
-        _send(chat_id, payload.get("response") or "[empty response]")
-    except (httpx.HTTPError, ValueError) as exc:
-        _send(chat_id, f"Shadow chat is unavailable: {exc}")
-
-
-HELP = """Shadow remote
-/ask <message> - talk to your configured Shadow model
-/status - linked home PC summary
-/screen - capture the linked home PC screen
-/lock - request screen lock
-/pending - list pending PC approvals
-/new - start a fresh Telegram chat session
-Plain text is sent to Shadow chat."""
+def _handle_clip(chat_id: int, rest: str) -> None:
+    sub, _, value = rest.partition(" ")
+    sub = sub.lower().strip()
+    if sub == "get":
+        try:
+            result = request_action("clipboard_get", {}, requested_by=f"telegram:{chat_id}")
+            _send(chat_id, result.get("text") or "[clipboard empty]")
+        except ShadowPcError as exc:
+            _send(chat_id, f"Clipboard read failed: {exc}")
+    elif sub == "set" and value.strip():
+        _propose(chat_id, "clipboard_set", {"text": value})
+    else:
+        _send(chat_id, "Usage: /clip get  OR  /clip set <text>")
 
 
 def _handle_message(message: dict[str, Any]) -> None:
@@ -162,13 +169,14 @@ def _handle_message(message: dict[str, Any]) -> None:
     if user_id not in _allowed():
         _send(chat_id, "Not authorized user.")
         return
+
     cmd, _, rest = body.partition(" ")
     cmd = cmd.lower()
     if cmd in {"/start", "/help"}:
         _send(chat_id, HELP)
     elif cmd == "/status":
         try:
-            _send(chat_id, json.dumps(request_action("status", {}, requested_by=f"telegram:{chat_id}"), indent=2, sort_keys=True))
+            _send(chat_id, _fmt_status(request_action("status", {}, requested_by=f"telegram:{chat_id}")))
         except ShadowPcError as exc:
             _send(chat_id, f"PC status unavailable: {exc}")
     elif cmd == "/screen":
@@ -178,18 +186,30 @@ def _handle_message(message: dict[str, Any]) -> None:
             _send(chat_id, f"Screenshot failed: {exc}")
     elif cmd == "/lock":
         _propose(chat_id, "lock")
+    elif cmd == "/processes":
+        try:
+            result = request_action("processes", {"limit": 12}, requested_by=f"telegram:{chat_id}")
+            _send(chat_id, "\n".join(result.get("processes") or []) or "[no process output]")
+        except ShadowPcError as exc:
+            _send(chat_id, f"Process list failed: {exc}")
+    elif cmd == "/clip":
+        _handle_clip(chat_id, rest.strip())
     elif cmd == "/pending":
-        rows = list_pending()
-        _send(chat_id, "\n".join(f"- {row['action']} ({row['id']})" for row in rows) or "No pending PC actions.")
-    elif cmd == "/new":
-        _clear_session(chat_id)
-        _send(chat_id, "Started a fresh Shadow chat.")
-    elif cmd == "/ask":
-        _chat(chat_id, rest.strip()) if rest.strip() else _send(chat_id, "Usage: /ask <message>")
-    elif cmd.startswith("/"):
-        _send(chat_id, HELP)
+        _send(chat_id, _fmt_pending(list_pending()))
+    elif cmd == "/approve" and rest.strip():
+        try:
+            result = confirm_action(rest.strip())
+            _send(chat_id, f"Executed: {result['action']}")
+        except ShadowPcError as exc:
+            _send(chat_id, f"Approval failed: {exc}")
+    elif cmd == "/cancel" and rest.strip():
+        try:
+            result = cancel_action(rest.strip())
+            _send(chat_id, f"Cancelled: {result['action']}")
+        except ShadowPcError as exc:
+            _send(chat_id, f"Cancel failed: {exc}")
     else:
-        _chat(chat_id, body)
+        _send(chat_id, HELP)
 
 
 def _handle_callback(callback: dict[str, Any]) -> None:
@@ -219,7 +239,7 @@ def main() -> None:
         raise SystemExit("Set SHADOW_TELEGRAM_BOT_TOKEN")
     if not _allowed():
         raise SystemExit("Set SHADOW_TELEGRAM_ALLOWED_USER_IDS")
-    print("Shadow Telegram bridge online")
+    print("Shadow Telegram PC-control bridge online")
     offset = 0
     while True:
         payload = _tg("getUpdates", timeout=30, offset=offset, allowed_updates=json.dumps(["message", "callback_query"]))
@@ -236,4 +256,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

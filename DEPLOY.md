@@ -45,17 +45,16 @@ APP_BIND=127.0.0.1
 APP_PORT=7000
 SECURE_COOKIES=true
 ALLOWED_ORIGINS=https://shadow.YOUR_DOMAIN
-ODYSSEUS_ADMIN_USER=YOUR_ADMIN_NAME
-ODYSSEUS_ADMIN_PASSWORD=USE_A_RANDOM_FIRST_BOOT_PASSWORD
+SHADOW_ADMIN_USER=YOUR_ADMIN_NAME
+SHADOW_ADMIN_PASSWORD=USE_A_RANDOM_FIRST_BOOT_PASSWORD
 ```
 
-`ODYSSEUS_*` remains an internal compatibility prefix. Visible branding is
-Shadow. Start the stack:
+`SHADOW_*` is the environment-variable prefix. Start the stack:
 
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=150 odysseus
+docker compose logs --tail=150 shadow
 ```
 
 The container has `restart: unless-stopped`, so Docker brings it back after a
@@ -159,13 +158,12 @@ by `SHADOW_ALLOWED_APPS` on the home PC.
 
 ## 5. Optional Telegram Remote
 
-Create a bot with BotFather. In Shadow Settings, mint a chat-scoped API token.
+Create a bot with BotFather. The bridge is PC-control only and does not need a Shadow chat API token.
 Add these values to VPS `.env`:
 
 ```dotenv
 SHADOW_TELEGRAM_BOT_TOKEN=YOUR_BOTFATHER_TOKEN
 SHADOW_TELEGRAM_ALLOWED_USER_IDS=YOUR_NUMERIC_TELEGRAM_USER_ID
-SHADOW_APP_API_TOKEN=ody_YOUR_CHAT_SCOPED_TOKEN
 ```
 
 Start the opt-in Compose profile:
@@ -176,7 +174,7 @@ docker compose logs -f shadow-telegram
 ```
 
 Unauthorized Telegram accounts receive only `Not authorized user.` The bridge
-does not reveal user IDs or setup instructions.
+does not reveal user IDs, setup instructions, AI chat, or shell access.
 
 ## 6. Backups And Operations
 
@@ -185,7 +183,7 @@ Treat every backup as secret material.
 
 ```bash
 docker compose ps
-docker compose logs --tail=200 odysseus
+docker compose logs --tail=200 shadow
 tar -czf "shadow-data-$(date +%F).tgz" data
 ```
 

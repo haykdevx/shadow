@@ -1,7 +1,7 @@
 """
 agent_loop.py
 
-Streaming agent loop for odysseus-ui.
+Streaming agent loop for shadow-ui.
 Wraps stream_llm() with multi-round tool execution.
 The LLM decides when to use tools by writing fenced code blocks.
 """

@@ -37,5 +37,15 @@ mcp
 pyotp
 qrcode[pil]
 croniter
+# Music player (routes/music_routes.py): YouTube search + audio stream
+# resolution. The [default] extra pulls yt-dlp-ejs (the JS challenge-solver
+# scripts) which, together with Deno (installed in the Dockerfile), clears
+# YouTube's n-signature challenge. yt-dlp changes often as YouTube changes —
+# keep it updated (`pip install -U "yt-dlp[default]"`) if streaming breaks.
+yt-dlp[default]
+# PO-token plugin: lets yt-dlp clear YouTube's "confirm you're not a bot"
+# datacenter-IP check by fetching tokens from the bgutil-pot service
+# (see docker-compose.yml). Auto-loaded by yt-dlp once installed.
+bgutil-ytdlp-pot-provider
 pytest
 pytest-asyncio

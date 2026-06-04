@@ -16,8 +16,8 @@ set -e
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
-PORT="${ODYSSEUS_PORT:-7860}"   # 7860, not 7000 — macOS AirPlay Receiver holds 7000.
-HOST="${ODYSSEUS_HOST:-127.0.0.1}" # Set ODYSSEUS_HOST=0.0.0.0 for LAN/Tailscale access.
+PORT="${SHADOW_PORT:-7860}"   # 7860, not 7000 — macOS AirPlay Receiver holds 7000.
+HOST="${SHADOW_HOST:-127.0.0.1}" # Set SHADOW_HOST=0.0.0.0 for LAN/Tailscale access.
 PROBE_HOST="$HOST"
 if [ "$PROBE_HOST" = "0.0.0.0" ] || [ "$PROBE_HOST" = "::" ]; then
   PROBE_HOST="127.0.0.1"
@@ -31,7 +31,7 @@ echo "▶ Shadow quick start for macOS"
 # Fail fast if the port is already taken (e.g. a previous run still running).
 if (exec 3<>"/dev/tcp/$PROBE_HOST/$PORT") 2>/dev/null; then
   echo "✗ Port $PORT is already in use on $PROBE_HOST. Stop what's using it, or pick another port:"
-  echo "    ODYSSEUS_PORT=7900 ./start-macos.sh"
+  echo "    SHADOW_PORT=7900 ./start-macos.sh"
   exit 1
 fi
 
@@ -126,10 +126,10 @@ echo "▶ Installing Python packages (first run downloads a few — can take a f
 #    the first time (idempotent — does nothing if already set up). Suppress its
 #    manual run hint — we launch the server ourselves just below.
 echo "▶ Preparing Shadow…"
-ODYSSEUS_SKIP_RUN_HINT=1 ./venv/bin/python setup.py
+SHADOW_SKIP_RUN_HINT=1 ./venv/bin/python setup.py
 
 # 5. Launch. Bind to loopback by default; opt into LAN/Tailscale with
-#    ODYSSEUS_HOST=0.0.0.0.
+#    SHADOW_HOST=0.0.0.0.
 URL_HOST="$HOST"
 if [ "$URL_HOST" = "0.0.0.0" ] || [ "$URL_HOST" = "::" ]; then
   URL_HOST="127.0.0.1"
@@ -146,9 +146,9 @@ fi
 # Open the browser automatically once the server is accepting connections — so
 # the URL isn't lost in the startup logs that keep scrolling. Runs in the
 # background and is cleaned up when the server stops. Skip with
-# ODYSSEUS_NO_OPEN=1 (e.g. over SSH / headless).
+# SHADOW_NO_OPEN=1 (e.g. over SSH / headless).
 POLLER_PID=""
-if [ -z "$ODYSSEUS_NO_OPEN" ] && command -v open >/dev/null 2>&1; then
+if [ -z "$SHADOW_NO_OPEN" ] && command -v open >/dev/null 2>&1; then
   (
     for _ in $(seq 1 90); do
       if (exec 3<>"/dev/tcp/$PROBE_HOST/$PORT") 2>/dev/null; then

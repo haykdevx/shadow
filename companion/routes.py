@@ -4,7 +4,7 @@ A thin, additive layer so a LAN client (e.g. a phone) can discover what a server
 offers and pair to it, without duplicating any LLM logic.
 
 Auth is enforced globally by AuthMiddleware (app.py), so reaching a handler here
-means the caller is authenticated by either a cookie session or a Bearer `ody_`
+means the caller is authenticated by either a cookie session or a Bearer `shd_`
 API token. The read endpoints (ping/info/models) accept either; the pairing
 endpoints are admin-cookie only.
 

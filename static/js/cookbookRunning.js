@@ -613,7 +613,7 @@ export function _tmuxCmd(task, tmuxArgs) {
 }
 
 function _winSessionCmd(task, tmuxArgs) {
-  const sd = '$env:TEMP\\odysseus-sessions';
+  const sd = '$env:TEMP\\shadow-sessions';
   const sid = task.sessionId;
   const pf = _sshPrefix(_getPort(task));
   const host = task.remoteHost;
@@ -639,7 +639,7 @@ function _winSessionCmd(task, tmuxArgs) {
 
 function _tmuxGracefulKill(task) {
   if (_isWindows(task)) {
-    const sd = '$env:TEMP\\odysseus-sessions';
+    const sd = '$env:TEMP\\shadow-sessions';
     const sid = task.sessionId;
     const pf = _sshPrefix(_getPort(task));
     const ps = `$p = Get-Content '${sd}\\${sid}.pid' -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }; Remove-Item '${sd}\\${sid}.*' -Force -ErrorAction SilentlyContinue`;
@@ -1847,7 +1847,7 @@ export function _renderRunningTab() {
           }});
         }
         if (_isWindows(task)) {
-          const sd = '$env:TEMP\\odysseus-sessions';
+          const sd = '$env:TEMP\\shadow-sessions';
           const logCmd = `ssh ${_sshPrefix(_getPort(task))}${task.remoteHost} "powershell -Command \\"Get-Content '${sd}\\${task.sessionId}.log' -Wait\\""`;
           items.push({ label: 'Copy log cmd', action: 'copy-tmux', custom: () => {
             _copyText(logCmd);

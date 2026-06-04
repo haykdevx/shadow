@@ -929,7 +929,7 @@ def _scheduled_poll_once() -> dict:
         now_iso = datetime.utcnow().isoformat()
         conn = sqlite3.connect(SCHEDULED_DB)
         cols = [row[1] for row in conn.execute("PRAGMA table_info(scheduled_emails)").fetchall()]
-        kind_expr = "odysseus_kind" if "odysseus_kind" in cols else "'scheduled' AS odysseus_kind"
+        kind_expr = "shadow_kind" if "shadow_kind" in cols else "'scheduled' AS shadow_kind"
         rows = conn.execute(f"""
             SELECT id, to_addr, cc, bcc, subject, body, in_reply_to, references_hdr, attachments, account_id, {kind_expr}
             FROM scheduled_emails
@@ -942,7 +942,7 @@ def _scheduled_poll_once() -> dict:
             try:
                 attachments = json.loads(r[8] or "[]")
                 row_account_id = r[9] if len(r) > 9 else None
-                odysseus_kind = r[10] if len(r) > 10 else "scheduled"
+                shadow_kind = r[10] if len(r) > 10 else "scheduled"
                 cfg = _get_email_config(row_account_id)
                 has_atts = bool(attachments)
                 if has_atts:
@@ -957,8 +957,8 @@ def _scheduled_poll_once() -> dict:
                     outer["Cc"] = r[2]
                 outer["Subject"] = r[4] or ""
                 outer["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-                outer["X-Shadow-Origin"] = "odysseus-ui"
-                outer["X-Shadow-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", odysseus_kind or "scheduled")[:64]
+                outer["X-Shadow-Origin"] = "shadow-ui"
+                outer["X-Shadow-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", shadow_kind or "scheduled")[:64]
                 outer["X-Shadow-Ref"] = sid
                 if r[6]:
                     outer["In-Reply-To"] = r[6]
@@ -1010,7 +1010,7 @@ def _scheduled_poll_once() -> dict:
 async def _scheduled_email_poller():
     """Background task that checks for due scheduled emails every 30
     seconds. Each tick delegates to `_scheduled_poll_once`, which is
-    also exposed via the `odysseus-mail poll-scheduled` CLI for
+    also exposed via the `shadow-mail poll-scheduled` CLI for
     cron-driven deployments."""
     import asyncio
 
@@ -1026,13 +1026,13 @@ _poller_task = None
 _summarize_task = None
 
 def _inprocess_pollers_enabled() -> bool:
-    """Honour `ODYSSEUS_INPROCESS_POLLERS` — set to `0`/`false`/`no`/`off`
+    """Honour `SHADOW_INPROCESS_POLLERS` — set to `0`/`false`/`no`/`off`
     to disable the asyncio tasks so a cron / systemd-timer setup driving
-    `odysseus-mail poll-scheduled` is the sole external driver. The legacy
+    `shadow-mail poll-scheduled` is the sole external driver. The legacy
     auto-summary/reply poller no longer starts here; scheduled Tasks own that
     work so Email settings are only feature gates, not a second scheduler."""
     import os
-    raw = os.environ.get("ODYSSEUS_INPROCESS_POLLERS", "1").strip().lower()
+    raw = os.environ.get("SHADOW_INPROCESS_POLLERS", "1").strip().lower()
     return raw not in ("0", "false", "no", "off", "")
 
 
@@ -1040,13 +1040,13 @@ def _start_poller():
     """Start background pollers. Called at module load; if no event loop is
     running yet (common at import time), defer via a first-request hook.
 
-    Skipped entirely when `ODYSSEUS_INPROCESS_POLLERS=0` — use that when
+    Skipped entirely when `SHADOW_INPROCESS_POLLERS=0` — use that when
     you're driving polling from cron / systemd to avoid two copies of
     `_scheduled_poll_once` racing on the same SQLite."""
     if not _inprocess_pollers_enabled():
         logger.info(
-            "In-process email pollers disabled (ODYSSEUS_INPROCESS_POLLERS=0); "
-            "drive `odysseus-mail poll-scheduled` externally."
+            "In-process email pollers disabled (SHADOW_INPROCESS_POLLERS=0); "
+            "drive `shadow-mail poll-scheduled` externally."
         )
         return
     import asyncio

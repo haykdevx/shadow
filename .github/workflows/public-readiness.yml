@@ -1,0 +1,27 @@
+name: Public readiness
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hygiene-and-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Public readiness check
+        run: python scripts/public_readiness_check.py --strict
+      - name: Python syntax
+        run: |
+          python -m py_compile app.py
+          find core routes src services companion mcp_servers scripts -name '*.py' -print0 | xargs -0 python -m py_compile
+      - name: JavaScript syntax
+        run: |
+          node --check static/app.js
+          find static/js -name '*.js' -print0 | xargs -0 -n1 node --check

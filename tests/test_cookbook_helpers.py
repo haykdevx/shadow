@@ -107,16 +107,16 @@ def test_serve_preflight_failure_keeps_tmux_pane_visible():
     capture the helpful error, leaving users with a blank "crashed" card.
     """
     runner_lines = [
-        'ODYSSEUS_PREFLIGHT_EXIT=""',
+        'SHADOW_PREFLIGHT_EXIT=""',
         'echo "ERROR: vLLM is not installed. Open Cookbook -> Dependencies and install vllm on this server, then launch again."',
-        'ODYSSEUS_PREFLIGHT_EXIT=127',
+        'SHADOW_PREFLIGHT_EXIT=127',
     ]
     _append_serve_preflight_exit_lines(runner_lines, keep_shell_open=True)
     script = "\n".join(runner_lines)
 
     assert "ERROR: vLLM is not installed" in script
-    assert 'ODYSSEUS_PREFLIGHT_EXIT=127' in script
-    assert 'echo "=== Process exited with code $ODYSSEUS_PREFLIGHT_EXIT ==="' in script
+    assert 'SHADOW_PREFLIGHT_EXIT=127' in script
+    assert 'echo "=== Process exited with code $SHADOW_PREFLIGHT_EXIT ==="' in script
     assert 'exec "${SHELL:-/bin/bash}"' in script
     assert "exit 127" not in script
 
@@ -127,8 +127,8 @@ def test_serve_runner_preserves_command_exit_code():
     _append_serve_exit_code_lines(runner_lines, keep_shell_open=True)
     script = "\n".join(runner_lines)
 
-    assert "ODYSSEUS_CMD_EXIT=$?" in script
-    assert 'echo "=== Process exited with code $ODYSSEUS_CMD_EXIT ==="' in script
+    assert "SHADOW_CMD_EXIT=$?" in script
+    assert 'echo "=== Process exited with code $SHADOW_CMD_EXIT ==="' in script
     assert 'echo "=== Process exited with code $? ==="' not in script
 
 

@@ -70,7 +70,7 @@ class RenameUserRequest(BaseModel):
 class SetOpenRegistrationRequest(BaseModel):
     enabled: bool
 
-SESSION_COOKIE = "odysseus_session"
+SESSION_COOKIE = "shadow_session"
 
 
 def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
@@ -494,9 +494,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             import httpx
             from urllib.parse import urlparse
             # Strip any path/query the user accidentally pasted in the
-            # base URL (e.g. `http://host:8091/odysseus`) — otherwise
+            # base URL (e.g. `http://host:8091/shadow`) — otherwise
             # the topic gets appended after the path and we publish to
-            # `/odysseus/odysseus` (which ntfy 404s on). ntfy itself
+            # `/shadow/shadow` (which ntfy 404s on). ntfy itself
             # only ever serves from the root.
             raw_base = (integ.get("base_url") or "").strip()
             parsed = urlparse(raw_base)

@@ -112,7 +112,7 @@ export function initSidebarLayout(Storage, opts) {
   // MutationObserver doesn't immediately re-hide it (the swipe was opening it,
   // then checkSidebarAutoCollapse re-added .hidden because this flag was unset
   // — looked like nothing happened). Mirrors the hamburger's mobile-open path.
-  window._odyOpenSidebar = function(side) {
+  window._shdOpenSidebar = function(side) {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
     // On mobile, never open the sidebar while Compare is running — the panes
@@ -487,8 +487,8 @@ export function initSidebarLayout(Storage, opts) {
 // horizontal — without that, Firefox (and others) treat the horizontal swipe
 // as their own scroll/navigation gesture and our handler never gets to act.
 function _initChatSwipeToOpenSidebar() {
-  if (window.__odySwipeWired) return;
-  window.__odySwipeWired = true;
+  if (window.__shdSwipeWired) return;
+  window.__shdSwipeWired = true;
 
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [
@@ -553,8 +553,8 @@ function _initChatSwipeToOpenSidebar() {
       // Use the deliberate-open helper (sets _userToggledSidebar so the
       // auto-collapse observer doesn't instantly re-hide it). Fall back to a
       // plain unhide if the helper isn't wired yet.
-      if (typeof window._odyOpenSidebar === 'function') {
-        window._odyOpenSidebar(side);
+      if (typeof window._shdOpenSidebar === 'function') {
+        window._shdOpenSidebar(side);
       } else {
         const sb = document.getElementById('sidebar');
         if (sb) { sb.classList.remove('hidden'); try { syncRailSide(); } catch (_) {} }

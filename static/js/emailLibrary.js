@@ -523,7 +523,7 @@ function _libCacheWriteBack() {
 // Expose the active account id to other modules (document.js uses this when sending).
 // Simple global rather than cross-module import to keep coupling minimal.
 function _publishActiveAccount() {
-  try { window.__odysseusActiveEmailAccount = state._libAccountId || null; } catch (_) {}
+  try { window.__shadowActiveEmailAccount = state._libAccountId || null; } catch (_) {}
   // Publish the active account's own address so reply-all can exclude us from
   // the recipient list. This global was read in emailInbox.js but never set.
   try {
@@ -809,7 +809,7 @@ export function openEmailLibrary(opts = {}) {
     });
     if (!ok) return;
     try {
-      const res = await fetch(`${API_BASE}/api/email/odysseus/reminders?permanent=1${_acct()}`, {
+      const res = await fetch(`${API_BASE}/api/email/shadow/reminders?permanent=1${_acct()}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
@@ -2272,7 +2272,7 @@ async function _toggleCardPreview(card, em) {
 // occasionally splits a single reply into two bogus "turns" by treating a
 // signature/disclaimer as its own message), the user can flip this off to
 // fall back to plain rendering. Survives reloads.
-const _BUBBLES_DISABLED_KEY = 'odysseus.email.bubblesDisabled';
+const _BUBBLES_DISABLED_KEY = 'shadow.email.bubblesDisabled';
 // Threaded chat-bubble email view is DISABLED for now — too buggy to
 // ship. Force plain-text rendering everywhere by always returning true.
 // Re-enable by restoring the localStorage-backed body + the toggle
@@ -2833,7 +2833,7 @@ function _foldQuotedReplies(html) {
 // Global preference: AI summary panels stay collapsed across every email
 // once the user folds one, and stay expanded once they unfold. Stored in
 // localStorage so the choice survives reloads.
-const _SUMMARY_COLLAPSED_KEY = 'odysseus.email.summaryCollapsed';
+const _SUMMARY_COLLAPSED_KEY = 'shadow.email.summaryCollapsed';
 function _summaryCollapsedPref() {
   try { return localStorage.getItem(_SUMMARY_COLLAPSED_KEY) === '1'; } catch { return false; }
 }

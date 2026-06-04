@@ -82,13 +82,13 @@ def create_default_admin():
         import json
 
         # Priority: env vars > interactive prompt > random password
-        username = os.getenv("ODYSSEUS_ADMIN_USER", "").strip().lower()
-        password = os.getenv("ODYSSEUS_ADMIN_PASSWORD", "").strip()
+        username = os.getenv("SHADOW_ADMIN_USER", "").strip().lower()
+        password = os.getenv("SHADOW_ADMIN_PASSWORD", "").strip()
 
         if username and password:
             # Both provided via env — use them directly
             pass
-        elif sys.stdin.isatty() and not os.getenv("ODYSSEUS_SKIP_ADMIN_PROMPT"):
+        elif sys.stdin.isatty() and not os.getenv("SHADOW_SKIP_ADMIN_PROMPT"):
             # Interactive terminal — ask the user
             username, password = _prompt_admin_credentials()
         else:
@@ -109,13 +109,13 @@ def create_default_admin():
         with open(auth_path, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
 
-        if sys.stdin.isatty() and not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
+        if sys.stdin.isatty() and not os.getenv("SHADOW_ADMIN_PASSWORD"):
             print(f"  [ok] Admin account created ({username})")
         else:
             print(f"  [ok] Initial admin user created ({username})")
-            if not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
+            if not os.getenv("SHADOW_ADMIN_PASSWORD"):
                 print(f"        Temporary password: {password}")
-                print(f"        ** Change it after first login. Set ODYSSEUS_ADMIN_PASSWORD to choose your own. **")
+                print(f"        ** Change it after first login. Set SHADOW_ADMIN_PASSWORD to choose your own. **")
         return "created"
     except ImportError:
         print("  [warn] bcrypt not installed — skipping admin user creation")
@@ -199,7 +199,7 @@ def main():
     print("\n=== Setup complete ===")
     # start-macos.sh launches the server itself (on its own port) right after
     # this, so suppress the manual hint there to avoid a contradictory URL.
-    if not os.getenv("ODYSSEUS_SKIP_RUN_HINT"):
+    if not os.getenv("SHADOW_SKIP_RUN_HINT"):
         print(f"\nStart the server with:")
         print(f"  python -m uvicorn app:app --host 127.0.0.1 --port 7000")
         print(f"\nThen open http://localhost:7000")

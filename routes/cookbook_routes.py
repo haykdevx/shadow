@@ -43,9 +43,9 @@ from routes.cookbook_helpers import (
 
 _HF_TOKEN_STATUS_SNIPPET = (
     'if [ -n "$HF_TOKEN" ]; then '
-    'echo "[odysseus] HF token: applied"; '
+    'echo "[shadow] HF token: applied"; '
     'else '
-    'echo "[odysseus] HF token: NOT SET — gated/private models will be denied. '
+    'echo "[shadow] HF token: NOT SET — gated/private models will be denied. '
     'Add one in Shadow Settings -> Cookbook -> HuggingFace Token."; '
     'fi'
 )
@@ -281,7 +281,7 @@ def setup_cookbook_routes() -> APIRouter:
             # which_tool so the .exe is found even when PATHEXT is unusual.
             ssh_keygen = which_tool("ssh-keygen") or "ssh-keygen"
             proc = await asyncio.create_subprocess_exec(
-                ssh_keygen, "-t", "ed25519", "-N", "", "-C", "odysseus-cookbook", "-f", str(key_path),
+                ssh_keygen, "-t", "ed25519", "-N", "", "-C", "shadow-cookbook", "-f", str(key_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -295,10 +295,10 @@ def setup_cookbook_routes() -> APIRouter:
 
     def _user_shell_path_bootstrap() -> list[str]:
         return [
-            'ODYSSEUS_USER_SHELL="${SHELL:-}"',
-            'if [ -n "$ODYSSEUS_USER_SHELL" ] && [ -x "$ODYSSEUS_USER_SHELL" ]; then',
-            '  ODYSSEUS_USER_PATH="$("$ODYSSEUS_USER_SHELL" -ic \'printf "__ODYSSEUS_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__ODYSSEUS_PATH__//p\' | tail -n 1 || true)"',
-            '  if [ -n "$ODYSSEUS_USER_PATH" ]; then export PATH="$ODYSSEUS_USER_PATH:$PATH"; fi',
+            'SHADOW_USER_SHELL="${SHELL:-}"',
+            'if [ -n "$SHADOW_USER_SHELL" ] && [ -x "$SHADOW_USER_SHELL" ]; then',
+            '  SHADOW_USER_PATH="$("$SHADOW_USER_SHELL" -ic \'printf "__SHADOW_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__SHADOW_PATH__//p\' | tail -n 1 || true)"',
+            '  if [ -n "$SHADOW_USER_PATH" ]; then export PATH="$SHADOW_USER_PATH:$PATH"; fi',
             'fi',
         ]
 
@@ -473,7 +473,7 @@ def setup_cookbook_routes() -> APIRouter:
             # ── Windows remote: generate .ps1 runner, use Start-Process for background ──
             remote_runner = f".{session_id}_run.ps1"
             ps_lines = []
-            ps_lines.append('$sessionDir = "$env:TEMP\\odysseus-sessions"')
+            ps_lines.append('$sessionDir = "$env:TEMP\\shadow-sessions"')
             ps_lines.append('New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null')
             if req.hf_token:
                 ps_lines.append(f"$env:HF_TOKEN = '{_ps_squote(req.hf_token)}'")
@@ -514,7 +514,7 @@ def setup_cookbook_routes() -> APIRouter:
             _pf = f"-p {_port} " if _port and _port != "22" else ""
             # Start-Process creates a fully detached process that survives SSH disconnect
             launch_ps = (
-                "$sd = \\\"$env:TEMP\\odysseus-sessions\\\"; "
+                "$sd = \\\"$env:TEMP\\shadow-sessions\\\"; "
                 f"Start-Process powershell -ArgumentList '-ExecutionPolicy','Bypass','-File','$HOME\\{remote_runner}' "
                 f"-RedirectStandardOutput \\\"$sd\\{session_id}.log\\\" "
                 f"-RedirectStandardError \\\"$sd\\{session_id}.err.log\\\" "
@@ -858,7 +858,7 @@ def setup_cookbook_routes() -> APIRouter:
             # ── Windows remote: generate .ps1 serve runner ──
             remote_runner = f".{session_id}_run.ps1"
             ps_lines = []
-            ps_lines.append('$sessionDir = "$env:TEMP\\odysseus-sessions"')
+            ps_lines.append('$sessionDir = "$env:TEMP\\shadow-sessions"')
             ps_lines.append('New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null')
             if req.hf_token:
                 ps_lines.append(f"$env:HF_TOKEN = '{_ps_squote(req.hf_token)}'")
@@ -893,7 +893,7 @@ def setup_cookbook_routes() -> APIRouter:
             _Pf = f"-P {_port} " if _port and _port != "22" else ""
             _pf = f"-p {_port} " if _port and _port != "22" else ""
             launch_ps = (
-                "$sd = \\\"$env:TEMP\\odysseus-sessions\\\"; "
+                "$sd = \\\"$env:TEMP\\shadow-sessions\\\"; "
                 f"Start-Process powershell -ArgumentList '-ExecutionPolicy','Bypass','-File','$HOME\\{remote_runner}' "
                 f"-RedirectStandardOutput \\\"$sd\\{session_id}.log\\\" "
                 f"-RedirectStandardError \\\"$sd\\{session_id}.err.log\\\" "
@@ -907,7 +907,7 @@ def setup_cookbook_routes() -> APIRouter:
             # ── Linux/Termux: bash + tmux (existing flow) ──
             runner_lines = ["#!/bin/bash"]
             runner_lines.extend(_user_shell_path_bootstrap())
-            runner_lines.append('ODYSSEUS_PREFLIGHT_EXIT=""')
+            runner_lines.append('SHADOW_PREFLIGHT_EXIT=""')
             # Put Shadow's own venv bin on PATH (local runs only) so the serve
             # shell resolves the bundled python3/hf, mirroring the download flow.
             if not remote:
@@ -976,26 +976,26 @@ def setup_cookbook_routes() -> APIRouter:
                 # failed CUDA attempt) doesn't cause the next configure to reuse
                 # stale settings and silently produce a CPU-only binary.
                 runner_lines.append('    cd ~/llama.cpp && rm -rf build')
-                runner_lines.append('    _ody_has_cuda_runtime=0')
+                runner_lines.append('    _shd_has_cuda_runtime=0')
                 runner_lines.append('    if command -v nvcc &>/dev/null; then')
                 runner_lines.append('      for _cudalib in "${CUDA_HOME:-}/lib64"/libcudart.so* "${CUDA_HOME:-}/lib"/libcudart.so* /usr/local/cuda/lib64/libcudart.so* /usr/lib*/libcudart.so*; do')
-                runner_lines.append('        [ -e "$_cudalib" ] && _ody_has_cuda_runtime=1 && break')
+                runner_lines.append('        [ -e "$_cudalib" ] && _shd_has_cuda_runtime=1 && break')
                 runner_lines.append('      done')
                 runner_lines.append('    fi')
-                runner_lines.append('    if command -v nvcc &>/dev/null && [ "$_ody_has_cuda_runtime" = "1" ]; then')
-                runner_lines.append('      echo "[odysseus] CUDA nvcc found — building llama-server with CUDA (GPU) support..."')
+                runner_lines.append('    if command -v nvcc &>/dev/null && [ "$_shd_has_cuda_runtime" = "1" ]; then')
+                runner_lines.append('      echo "[shadow] CUDA nvcc found — building llama-server with CUDA (GPU) support..."')
                 runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \\')
                 runner_lines.append('        && cmake --build build -j"$NPROC" --target llama-server \\')
                 runner_lines.append('        && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
                 runner_lines.append('    else')
                 runner_lines.append('      if command -v nvcc &>/dev/null; then')
-                runner_lines.append('        echo "[odysseus] WARNING: nvcc found but CUDA runtime library was not found — building llama-server for CPU only."')
+                runner_lines.append('        echo "[shadow] WARNING: nvcc found but CUDA runtime library was not found — building llama-server for CPU only."')
                 runner_lines.append('      else')
-                runner_lines.append('        echo "[odysseus] WARNING: nvcc not found — building llama-server for CPU only."')
+                runner_lines.append('        echo "[shadow] WARNING: nvcc not found — building llama-server for CPU only."')
                 runner_lines.append('      fi')
-                runner_lines.append('      echo "[odysseus]   GPU inference will not be available for this llama.cpp build."')
-                runner_lines.append('      echo "[odysseus]   To get a GPU build, first install vLLM via Cookbook -> Dependencies"')
-                runner_lines.append('      echo "[odysseus]   (its CUDA wheels include nvcc), then re-launch this serve task."')
+                runner_lines.append('      echo "[shadow]   GPU inference will not be available for this llama.cpp build."')
+                runner_lines.append('      echo "[shadow]   To get a GPU build, first install vLLM via Cookbook -> Dependencies"')
+                runner_lines.append('      echo "[shadow]   (its CUDA wheels include nvcc), then re-launch this serve task."')
                 runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release \\')
                 runner_lines.append('        && cmake --build build -j"$NPROC" --target llama-server \\')
                 runner_lines.append('        && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
@@ -1008,7 +1008,7 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('  fi')
                 runner_lines.append('  if ! command -v llama-server &>/dev/null && ! python3 -c "import llama_cpp" 2>/dev/null; then')
                 runner_lines.append('    echo "ERROR: llama.cpp serving is not available after install/build attempts."')
-                runner_lines.append('    ODYSSEUS_PREFLIGHT_EXIT=127')
+                runner_lines.append('    SHADOW_PREFLIGHT_EXIT=127')
                 runner_lines.append('  fi')
                 runner_lines.append('fi')
             elif "ollama" in req.cmd:
@@ -1021,50 +1021,50 @@ def setup_cookbook_routes() -> APIRouter:
                 # Ollama can be a host binary, a system service, or a Docker
                 # container. If the HTTP API is already reachable, the model is
                 # already served and we should not require a host `ollama` CLI.
-                runner_lines.append(f'ODYSSEUS_OLLAMA_HOST={_bash_squote(_ollama_host)}')
-                runner_lines.append(f'ODYSSEUS_OLLAMA_PORT="{_ollama_port}"')
-                runner_lines.append('ODYSSEUS_OLLAMA_URL=""')
-                runner_lines.append('for _ody_ollama_port in "$ODYSSEUS_OLLAMA_PORT" 11434; do')
-                runner_lines.append('  [ -z "$_ody_ollama_port" ] && continue')
-                runner_lines.append('  for _ody_ollama_host in 127.0.0.1 localhost host.docker.internal; do')
-                runner_lines.append('    _ody_ollama_url="http://${_ody_ollama_host}:${_ody_ollama_port}"')
-                runner_lines.append('    if curl -sf "$_ody_ollama_url/api/tags" >/dev/null 2>&1; then')
-                runner_lines.append('      ODYSSEUS_OLLAMA_URL="$_ody_ollama_url"')
-                runner_lines.append('      ODYSSEUS_OLLAMA_PORT="$_ody_ollama_port"')
+                runner_lines.append(f'SHADOW_OLLAMA_HOST={_bash_squote(_ollama_host)}')
+                runner_lines.append(f'SHADOW_OLLAMA_PORT="{_ollama_port}"')
+                runner_lines.append('SHADOW_OLLAMA_URL=""')
+                runner_lines.append('for _shd_ollama_port in "$SHADOW_OLLAMA_PORT" 11434; do')
+                runner_lines.append('  [ -z "$_shd_ollama_port" ] && continue')
+                runner_lines.append('  for _shd_ollama_host in 127.0.0.1 localhost host.docker.internal; do')
+                runner_lines.append('    _shd_ollama_url="http://${_shd_ollama_host}:${_shd_ollama_port}"')
+                runner_lines.append('    if curl -sf "$_shd_ollama_url/api/tags" >/dev/null 2>&1; then')
+                runner_lines.append('      SHADOW_OLLAMA_URL="$_shd_ollama_url"')
+                runner_lines.append('      SHADOW_OLLAMA_PORT="$_shd_ollama_port"')
                 runner_lines.append('      break 2')
                 runner_lines.append('    fi')
                 runner_lines.append('  done')
                 runner_lines.append('done')
-                runner_lines.append('if [ -n "$ODYSSEUS_OLLAMA_URL" ]; then')
-                runner_lines.append('  if [ "$ODYSSEUS_OLLAMA_PORT" != "' + _ollama_port + '" ]; then')
-                runner_lines.append('    echo "[odysseus] Selected Ollama port ' + _ollama_port + ' was not reachable; using running Ollama on port ${ODYSSEUS_OLLAMA_PORT}."')
+                runner_lines.append('if [ -n "$SHADOW_OLLAMA_URL" ]; then')
+                runner_lines.append('  if [ "$SHADOW_OLLAMA_PORT" != "' + _ollama_port + '" ]; then')
+                runner_lines.append('    echo "[shadow] Selected Ollama port ' + _ollama_port + ' was not reachable; using running Ollama on port ${SHADOW_OLLAMA_PORT}."')
                 runner_lines.append('  fi')
-                runner_lines.append('  echo "[odysseus] Ollama API ready on port ${ODYSSEUS_OLLAMA_PORT}: ${ODYSSEUS_OLLAMA_URL}"')
-                runner_lines.append('  echo "[odysseus] This task is monitoring an existing Ollama server; stopping it here will not stop an external Docker/system service."')
+                runner_lines.append('  echo "[shadow] Ollama API ready on port ${SHADOW_OLLAMA_PORT}: ${SHADOW_OLLAMA_URL}"')
+                runner_lines.append('  echo "[shadow] This task is monitoring an existing Ollama server; stopping it here will not stop an external Docker/system service."')
                 runner_lines.append('  exec bash -i')
                 runner_lines.append('fi')
                 runner_lines.append('if ! command -v ollama &>/dev/null; then')
-                runner_lines.append('  echo "ERROR: Ollama not found and no Ollama API is reachable on 127.0.0.1, localhost, or host.docker.internal (ports ${ODYSSEUS_OLLAMA_PORT}/11434)."')
+                runner_lines.append('  echo "ERROR: Ollama not found and no Ollama API is reachable on 127.0.0.1, localhost, or host.docker.internal (ports ${SHADOW_OLLAMA_PORT}/11434)."')
                 runner_lines.append('  echo "Install Ollama, start an Ollama service/container on this server, or pick the port where it is already listening."')
                 runner_lines.append('  echo')
                 runner_lines.append('  echo "=== Process exited with code 127 ==="')
                 runner_lines.append('  exec bash -i')
                 runner_lines.append('fi')
-                runner_lines.append('ODYSSEUS_OLLAMA_URL="http://${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}"')
+                runner_lines.append('SHADOW_OLLAMA_URL="http://${SHADOW_OLLAMA_HOST}:${SHADOW_OLLAMA_PORT}"')
                 if remote and _ollama_host in ("0.0.0.0", "::"):
-                    runner_lines.append('echo "[odysseus] WARNING: remote Ollama will bind to ${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT} so Shadow can reach it from this host."')
-                    runner_lines.append('echo "[odysseus] Ollama has no built-in authentication; expose this only on a trusted LAN/VPN or provide an explicit OLLAMA_HOST with your own access controls."')
-                runner_lines.append('echo "Starting ollama server on ${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}..."')
-                runner_lines.append('OLLAMA_HOST="${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}" ollama serve')
-                runner_lines.append('_ody_exit=$?')
+                    runner_lines.append('echo "[shadow] WARNING: remote Ollama will bind to ${SHADOW_OLLAMA_HOST}:${SHADOW_OLLAMA_PORT} so Shadow can reach it from this host."')
+                    runner_lines.append('echo "[shadow] Ollama has no built-in authentication; expose this only on a trusted LAN/VPN or provide an explicit OLLAMA_HOST with your own access controls."')
+                runner_lines.append('echo "Starting ollama server on ${SHADOW_OLLAMA_HOST}:${SHADOW_OLLAMA_PORT}..."')
+                runner_lines.append('OLLAMA_HOST="${SHADOW_OLLAMA_HOST}:${SHADOW_OLLAMA_PORT}" ollama serve')
+                runner_lines.append('_shd_exit=$?')
                 runner_lines.append('echo')
-                runner_lines.append('echo "=== Process exited with code ${_ody_exit} ==="')
+                runner_lines.append('echo "=== Process exited with code ${_shd_exit} ==="')
                 runner_lines.append('exec bash -i')
             elif "vllm serve" in req.cmd:
                 # vLLM is CUDA/ROCm-only and does not run on macOS at all.
                 runner_lines.append('if [ "$(uname -s)" = "Darwin" ]; then')
                 runner_lines.append('  echo "ERROR: vLLM does not run on macOS. Use Ollama or llama.cpp (Metal) instead."')
-                runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=1')
+                runner_lines.append('  SHADOW_PREFLIGHT_EXIT=1')
                 runner_lines.append('fi')
                 # Put ~/.local/bin on PATH first — without a venv, vllm installs
                 # there via --user and the non-login serve shell otherwise can't
@@ -1072,24 +1072,24 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('export PATH="$HOME/.local/bin:$PATH"')
                 runner_lines.append('if ! command -v vllm &>/dev/null; then')
                 runner_lines.append('  echo "ERROR: vLLM is not installed."')
-                runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=127')
+                runner_lines.append('  SHADOW_PREFLIGHT_EXIT=127')
                 runner_lines.append('fi')
             elif "sglang.launch_server" in req.cmd:
                 runner_lines.append('export PATH="$HOME/.local/bin:$PATH"')
                 runner_lines.append('if ! command -v sglang &>/dev/null; then')
                 runner_lines.append('  echo "ERROR: SGLang is not installed."')
-                runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=127')
-                runner_lines.append('elif ! ODYSSEUS_SGLANG_IMPORT_ERROR="$(python3 -c "import sglang" 2>&1)"; then')
+                runner_lines.append('  SHADOW_PREFLIGHT_EXIT=127')
+                runner_lines.append('elif ! SHADOW_SGLANG_IMPORT_ERROR="$(python3 -c "import sglang" 2>&1)"; then')
                 runner_lines.append('  echo "ERROR: SGLang is installed but failed to import."')
-                runner_lines.append('  printf "%s\\n" "$ODYSSEUS_SGLANG_IMPORT_ERROR"')
-                runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=127')
+                runner_lines.append('  printf "%s\\n" "$SHADOW_SGLANG_IMPORT_ERROR"')
+                runner_lines.append('  SHADOW_PREFLIGHT_EXIT=127')
                 runner_lines.append('fi')
             elif "scripts/diffusion_server.py" in req.cmd or ".diffusion_server.py" in req.cmd:
                 runner_lines.append('export PATH="$HOME/.local/bin:$PATH"')
-                runner_lines.append('if ! ODYSSEUS_DIFFUSION_IMPORT_ERROR="$(python3 -c "import torch, diffusers" 2>&1)"; then')
+                runner_lines.append('if ! SHADOW_DIFFUSION_IMPORT_ERROR="$(python3 -c "import torch, diffusers" 2>&1)"; then')
                 runner_lines.append('  echo "ERROR: Diffusion serving requires PyTorch + diffusers."')
-                runner_lines.append('  printf "%s\\n" "$ODYSSEUS_DIFFUSION_IMPORT_ERROR"')
-                runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=127')
+                runner_lines.append('  printf "%s\\n" "$SHADOW_DIFFUSION_IMPORT_ERROR"')
+                runner_lines.append('  SHADOW_PREFLIGHT_EXIT=127')
                 runner_lines.append('fi')
 
             if not handled_ollama_serve:
@@ -1228,7 +1228,7 @@ def setup_cookbook_routes() -> APIRouter:
             # Also create the session directory for background tasks
             setup_script = (
                 'powershell -Command "'
-                "New-Item -ItemType Directory -Force -Path $env:TEMP\\odysseus-sessions | Out-Null; "
+                "New-Item -ItemType Directory -Force -Path $env:TEMP\\shadow-sessions | Out-Null; "
                 "try { python --version } catch { Write-Host 'ERROR: Python not found — install from python.org'; exit 1 }; "
                 "python -m pip install -q huggingface-hub 2>$null; "
                 "python -c \\\"from huggingface_hub import snapshot_download; print('OK')\\\""
@@ -1900,7 +1900,7 @@ def setup_cookbook_routes() -> APIRouter:
                 continue
             if task_platform == "windows" and remote:
                 # Windows: check PID file + Get-Process, read log tail
-                sd = "$env:TEMP\\odysseus-sessions"
+                sd = "$env:TEMP\\shadow-sessions"
                 ssh_base = ["ssh"]
                 if _tport and _tport != "22":
                     ssh_base.extend(["-p", str(_tport)])

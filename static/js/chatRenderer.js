@@ -695,7 +695,7 @@ export function getImageCost(model, quality, size) {
 }
 
 /* ── Session cost helpers ─────────────────────────────────────────── */
-const _COST_KEY = 'ody-session-cost';
+const _COST_KEY = 'shd-session-cost';
 
 /** Return the accumulated cost for the current (or given) session. */
 export function getSessionCost(sessionId) {
@@ -1239,7 +1239,7 @@ export function showWelcomeScreen() {
 }
 
 // ── Dynamic action buttons (show 3 most recent, rest under ···) ──
-const _ACTION_RECENTS_KEY = 'odysseus-msg-actions-recent';
+const _ACTION_RECENTS_KEY = 'shadow-msg-actions-recent';
 const _MAX_VISIBLE = 2;
 
 function _getRecentActions() {
@@ -1455,7 +1455,7 @@ export function createMsgFooter(msgElement) {
 /**
  * Create a footer row for a user message with action buttons (same system as AI footer).
  */
-const _USER_ACTION_RECENTS_KEY = 'odysseus-user-actions-recent';
+const _USER_ACTION_RECENTS_KEY = 'shadow-user-actions-recent';
 
 function _getUserRecentActions() {
   try { return JSON.parse(localStorage.getItem(_USER_ACTION_RECENTS_KEY) || '[]'); } catch { return []; }

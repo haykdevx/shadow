@@ -16,9 +16,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     tmux \
+    unzip \
     openssh-client \
     gosu \
     && rm -rf /var/lib/apt/lists/*
+
+# Deno — JS runtime yt-dlp uses (via the yt-dlp-ejs scripts in requirements)
+# to solve YouTube's n-signature challenge for the music player. Debian's
+# nodejs is too old (<22) for yt-dlp's EJS, and Deno is the default runtime.
+RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip \
+    && unzip -o /tmp/deno.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && rm /tmp/deno.zip
 
 WORKDIR /app
 

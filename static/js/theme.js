@@ -31,8 +31,8 @@ export const THEMES = {
 };
 
 const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const LS_KEY = 'shadow-theme';
+const CUSTOM_THEMES_KEY = 'shadow-custom-themes';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
@@ -1257,7 +1257,7 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'odysseus_' + (obj.name || 'theme') + '.json';
+      a.download = 'shadow_' + (obj.name || 'theme') + '.json';
       a.click();
       URL.revokeObjectURL(url);
       newExp.innerHTML = '&#x2713; Downloaded!';

@@ -16,12 +16,15 @@ PGID="${PGID:-1000}"
 
 # Reuse an existing matching group/user if the host's UID/GID already
 # corresponds to one in /etc/passwd (e.g. when the image is rebuilt
-# and "odysseus" already exists at the same id). Otherwise create.
+# and "shadowapp" already exists at the same id). Otherwise create.
+# NB: the account is named "shadowapp", not "shadow" — "shadow" is a
+# reserved system group on Debian/Ubuntu (it guards /etc/shadow), so
+# `groupadd shadow` fails. Only the numeric PUID:PGID is used downstream.
 if ! getent group "$PGID" >/dev/null 2>&1; then
-    groupadd -g "$PGID" odysseus
+    groupadd -g "$PGID" shadowapp
 fi
 if ! getent passwd "$PUID" >/dev/null 2>&1; then
-    useradd -u "$PUID" -g "$PGID" -M -s /bin/sh -d /app odysseus
+    useradd -u "$PUID" -g "$PGID" -M -s /bin/sh -d /app shadowapp
 fi
 
 # Repair ownership on every writable path the app touches at runtime.

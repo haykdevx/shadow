@@ -25,6 +25,6 @@
 
 ### Upstream foundation
 
-Shadow is a fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus).
+Shadow is a fork of [Shadow](https://github.com/haykdevx/dev).
 The upstream MIT license and acknowledgments remain in this repository.
 
