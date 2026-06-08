@@ -3,12 +3,14 @@ import json
 import pytest
 
 from companion.home_agent import HomeAgentError, execute_action
-from src import shadow_pc
+from src import shadow_access, shadow_pc
 
 
 @pytest.fixture(autouse=True)
-def _clean_pending(monkeypatch):
+def _clean_pending(monkeypatch, tmp_path):
     shadow_pc._PENDING.clear()
+    monkeypatch.setattr(shadow_access, "ACCESS_PATH", tmp_path / "shadow-pc-access.json")
+    monkeypatch.setenv("SHADOW_PC_OWNER", "admin")
     monkeypatch.setenv("SHADOW_HOME_AGENT_URL", "http://100.64.10.20:8765")
     monkeypatch.setenv("SHADOW_HOME_AGENT_TOKEN", "a" * 64)
     monkeypatch.delenv("SHADOW_HOME_AGENT_ALLOW_PUBLIC", raising=False)
@@ -56,6 +58,27 @@ def test_write_action_waits_for_explicit_confirmation(monkeypatch):
     assert shadow_pc.confirm_action(pending_id) == {"status": "executed", "action": "lock", "result": {"ok": True}}
     assert calls == [("lock", {}, True)]
     assert shadow_pc.list_pending() == []
+
+
+def test_pending_actions_are_isolated_by_principal(monkeypatch):
+    monkeypatch.setattr(shadow_pc, "_call_home_agent", lambda *args, **kwargs: {"ok": True})
+    pending_id = shadow_pc.request_action("lock", requested_by="web:alice", principal="alice")["pending"]["id"]
+
+    assert shadow_pc.list_pending(principal="bob") == []
+    assert [row["id"] for row in shadow_pc.list_pending(principal="alice")] == [pending_id]
+    with pytest.raises(shadow_pc.ShadowPcError, match="another account"):
+        shadow_pc.confirm_action(pending_id, principal="bob")
+    assert shadow_pc.confirm_action(pending_id, principal="alice")["status"] == "executed"
+
+
+def test_agent_pc_tool_uses_account_permissions(monkeypatch):
+    monkeypatch.setattr(shadow_pc, "_call_home_agent", lambda *args, **kwargs: {"ok": True})
+    denied = shadow_pc.tool_action(json.dumps({"action": "status"}), requested_by="agent:bob")
+    assert denied["exit_code"] == 1
+    assert "permission" in denied["error"]
+
+    allowed = shadow_pc.tool_action(json.dumps({"action": "status"}), requested_by="agent:admin")
+    assert allowed["exit_code"] == 0
 
 
 def test_unconfigured_write_action_is_not_queued(monkeypatch):

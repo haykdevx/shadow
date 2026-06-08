@@ -36,7 +36,7 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 **System control**
 - **Command** — a dashboard for a linked Linux PC: vitals, screenshots, processes, files, windows, runbooks, and an approvals queue.
 - Allowlisted home-PC companion intended for **Tailscale-only** access, with explicit confirmation gates for lock, typing, keypress, clipboard, media, volume, and app control.
-- Optional **Telegram** bridge that reuses the owner-scoped chat API with callback approvals.
+- Optional **Telegram** PC remote paired with a one-time code; it inherits the linked Shadow account's `view`, `control`, and `approve` permissions.
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 
@@ -159,7 +159,7 @@ cd dev
 cp .env.example .env        # optional, recommended for explicit defaults
 docker compose up -d --build
 ```
-Open `http://localhost:7000` once the containers are healthy. The UI binds to `127.0.0.1` by default; set `APP_PORT` if `7000` is taken, and `APP_BIND=0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
+Open `http://localhost:7000` once the containers are healthy. The UI binds to `127.0.0.1` by default; set `APP_PORT` if `7000` is taken. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access, and keep authentication plus TLS enabled.
 
 ### Native (Linux / macOS)
 ```bash
@@ -218,7 +218,7 @@ Each `shadow-<name>` script is a standalone CLI; symlink `scripts/shadow` onto y
 
 - Single-operator by design; **keep `AUTH_ENABLED=true`** whenever bound outside loopback, and never expose the app port directly to the public internet — front it with the nginx + TLS setup in [DEPLOY.md](DEPLOY.md).
 - Cookie sessions + bcrypt + optional **TOTP 2FA**; scoped, revocable API tokens for paired clients.
-- Home-PC control is opt-in, allowlisted, **Tailscale-only**, and gated by explicit approvals; `pc_control` is blocked for non-admin users.
+- Home-PC control is opt-in and **Tailscale-only**. `SHADOW_PC_OWNER` owns the device; every other account defaults to no access and needs explicit `view`, `control`, and/or `approve` grants. The dashboard, AI tool, pending queue, audit timeline, and Telegram bridge all enforce the same account scope.
 - Secrets and runtime data (`.env`, `data/`, cookies) are git-ignored and never committed.
 
 ---

@@ -128,6 +128,7 @@ SHADOW_HOME_AGENT_URL=http://100.x.y.z:8765
 SHADOW_HOME_AGENT_TOKEN=YOUR_RANDOM_64_HEX_TOKEN
 SHADOW_HOME_AGENT_ALLOW_PUBLIC=false
 SHADOW_PC_CONFIRM_TTL_SECONDS=300
+SHADOW_PC_OWNER=YOUR_SHADOW_USERNAME
 ```
 
 Restart Shadow:
@@ -159,11 +160,11 @@ by `SHADOW_ALLOWED_APPS` on the home PC.
 ## 5. Optional Telegram Remote
 
 Create a bot with BotFather. The bridge is PC-control only and does not need a Shadow chat API token.
-Add these values to VPS `.env`:
+Add the token to VPS `.env`; the numeric allowlist is optional defense-in-depth:
 
 ```dotenv
 SHADOW_TELEGRAM_BOT_TOKEN=YOUR_BOTFATHER_TOKEN
-SHADOW_TELEGRAM_ALLOWED_USER_IDS=YOUR_NUMERIC_TELEGRAM_USER_ID
+SHADOW_TELEGRAM_ALLOWED_USER_IDS=
 ```
 
 Start the opt-in Compose profile:
@@ -173,8 +174,15 @@ docker compose --profile telegram up -d --build
 docker compose logs -f shadow-telegram
 ```
 
-Unauthorized Telegram accounts receive only `Not authorized user.` The bridge
-does not reveal user IDs, setup instructions, AI chat, or shell access.
+Pair an account from **Command > Device Access**:
+
+1. Sign in to Shadow with an account that already has linked-PC `view` permission.
+2. Select **Generate Telegram pairing code**.
+3. Send `/pair CODE` to the bot within ten minutes. The code is single-use.
+4. Telegram inherits that Shadow account's current `view`, `control`, and `approve` grants. Revoking the web grant also revokes its Telegram link.
+
+Unauthorized Telegram accounts receive only `Not authorized user.` Pending actions,
+approvals, and audit events are isolated to the paired Shadow account.
 
 ## 6. Backups And Operations
 

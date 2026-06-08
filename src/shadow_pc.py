@@ -333,13 +333,22 @@ def _max_risk(values: list[str]) -> str:
     return max(values, key=lambda item: _RISK_WEIGHT.get(item, 3))
 
 
-def _audit(action: str, status: str, *, requested_by: str = "system", args: dict[str, Any] | None = None, detail: str = "") -> None:
+def _audit(
+    action: str,
+    status: str,
+    *,
+    requested_by: str = "system",
+    principal: str | None = None,
+    args: dict[str, Any] | None = None,
+    detail: str = "",
+) -> None:
     record = {
         "ts": time.time(),
         "action": action,
         "status": status,
         "risk": _risk_for(action, args or {}),
         "requested_by": str(requested_by or "unknown")[:100],
+        "principal": str(principal or "")[:100],
         "args": _redact_args(args or {}),
         "detail": str(detail or "")[:500],
     }
@@ -355,21 +364,23 @@ def _audit(action: str, status: str, *, requested_by: str = "system", args: dict
         pass
 
 
-def timeline(limit: int = 80) -> list[dict[str, Any]]:
+def timeline(limit: int = 80, principal: str | None = None) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit or 80), 300))
     try:
-        lines = AUDIT_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()[-limit:]
+        lines = AUDIT_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
         return []
     rows: list[dict[str, Any]] = []
-    for line in lines:
+    for line in reversed(lines):
         try:
             item = json.loads(line)
         except Exception:
             continue
-        if isinstance(item, dict):
+        if isinstance(item, dict) and (principal is None or item.get("principal") == principal):
             rows.append(item)
-    return list(reversed(rows))
+            if len(rows) >= limit:
+                break
+    return rows
 
 
 def _runbook_key(value: str) -> str:
@@ -501,7 +512,7 @@ def delete_runbook(name: str) -> dict[str, Any]:
     return {"ok": True, "name": key}
 
 
-def _execute_runbook(name: str, *, requested_by: str) -> dict[str, Any]:
+def _execute_runbook(name: str, *, requested_by: str, principal: str | None = None) -> dict[str, Any]:
     key = _runbook_key(name)
     spec = _all_runbooks().get(key)
     if not spec:
@@ -520,13 +531,13 @@ def _execute_runbook(name: str, *, requested_by: str) -> dict[str, Any]:
             results.append({"action": action, "risk": _risk_for(action, args), "ok": False, "error": str(exc)})
             break
     ok = all(item.get("ok") for item in results)
-    _audit("runbook", "executed" if ok else "failed", requested_by=requested_by, args={"name": key}, detail=spec["label"])
+    _audit("runbook", "executed" if ok else "failed", requested_by=requested_by, principal=principal, args={"name": key}, detail=spec["label"])
     return {"ok": ok, "name": key, "label": spec["label"], "risk": _runbook_risk(spec), "results": results}
 
 
-def watchdog() -> dict[str, Any]:
-    data = overview()
-    data["timeline"] = timeline(12)
+def watchdog(principal: str | None = None) -> dict[str, Any]:
+    data = overview(principal=principal)
+    data["timeline"] = timeline(12, principal=principal)
     data["runbooks"] = list_runbooks()
     data["watchdog"] = {
         "ok": bool(data.get("online")),
@@ -565,7 +576,13 @@ def _purge_expired() -> None:
         _PENDING.pop(key, None)
 
 
-def request_action(action: str, args: Any = None, *, requested_by: str = "web") -> dict[str, Any]:
+def request_action(
+    action: str,
+    args: Any = None,
+    *,
+    requested_by: str = "web",
+    principal: str | None = None,
+) -> dict[str, Any]:
     action = str(action or "").strip().lower()
     if action not in ALL_ACTIONS:
         raise ShadowPcError(f"Unsupported home PC action: {action or '(missing)'}")
@@ -574,10 +591,10 @@ def request_action(action: str, args: Any = None, *, requested_by: str = "web") 
     if action in READ_ACTIONS:
         try:
             result = _demo_read_action(action, clean_args) if _demo_enabled() else _call_home_agent(action, clean_args, confirmed=False)
-            _audit(action, "executed", requested_by=requested_by, args=clean_args)
+            _audit(action, "executed", requested_by=requested_by, principal=principal, args=clean_args)
             return result
         except ShadowPcError as exc:
-            _audit(action, "failed", requested_by=requested_by, args=clean_args, detail=str(exc))
+            _audit(action, "failed", requested_by=requested_by, principal=principal, args=clean_args, detail=str(exc))
             raise
     now = time.time()
     item = {
@@ -586,47 +603,85 @@ def request_action(action: str, args: Any = None, *, requested_by: str = "web") 
         "args": clean_args,
         "risk": _risk_for(action, clean_args),
         "requested_by": str(requested_by or "unknown")[:100],
+        "principal": str(principal or "")[:100],
         "created_at": now,
         "expires_at": now + _ttl_seconds(),
     }
     with _LOCK:
         _purge_expired()
         _PENDING[item["id"]] = item
-    _audit(action, "pending", requested_by=requested_by, args=clean_args)
+    _audit(action, "pending", requested_by=requested_by, principal=principal, args=clean_args)
     return {"status": "pending_confirmation", "pending": dict(item)}
 
 
-def list_pending() -> list[dict[str, Any]]:
+def list_pending(principal: str | None = None) -> list[dict[str, Any]]:
     with _LOCK:
         _purge_expired()
-        return [dict(item) for item in sorted(_PENDING.values(), key=lambda row: row["created_at"])]
+        return [
+            dict(item)
+            for item in sorted(_PENDING.values(), key=lambda row: row["created_at"])
+            if principal is None or item.get("principal") == principal
+        ]
 
 
-def confirm_action(pending_id: str) -> dict[str, Any]:
+def confirm_action(pending_id: str, principal: str | None = None) -> dict[str, Any]:
     with _LOCK:
         _purge_expired()
-        item = _PENDING.pop(str(pending_id or ""), None)
+        key = str(pending_id or "")
+        item = _PENDING.get(key)
+        if item and principal is not None and item.get("principal") != principal:
+            raise ShadowPcError("Pending action belongs to another account")
+        if item:
+            _PENDING.pop(key, None)
     if not item:
         raise ShadowPcError("Pending action was not found or has expired")
     try:
         if item["action"] == "runbook":
-            result = _execute_runbook(str(item.get("args", {}).get("name") or ""), requested_by=item.get("requested_by", "web"))
+            result = _execute_runbook(
+                str(item.get("args", {}).get("name") or ""),
+                requested_by=item.get("requested_by", "web"),
+                principal=item.get("principal"),
+            )
         else:
             result = _demo_confirmed_action(item["action"], item["args"]) if _demo_enabled() else _call_home_agent(item["action"], item["args"], confirmed=True)
-            _audit(item["action"], "executed", requested_by=item.get("requested_by", "web"), args=item.get("args") or {})
+            _audit(
+                item["action"],
+                "executed",
+                requested_by=item.get("requested_by", "web"),
+                principal=item.get("principal"),
+                args=item.get("args") or {},
+            )
         return {"status": "executed", "action": item["action"], "result": result}
     except ShadowPcError as exc:
-        _audit(item["action"], "failed", requested_by=item.get("requested_by", "web"), args=item.get("args") or {}, detail=str(exc))
+        _audit(
+            item["action"],
+            "failed",
+            requested_by=item.get("requested_by", "web"),
+            principal=item.get("principal"),
+            args=item.get("args") or {},
+            detail=str(exc),
+        )
         raise
 
 
-def cancel_action(pending_id: str) -> dict[str, Any]:
+def cancel_action(pending_id: str, principal: str | None = None) -> dict[str, Any]:
     with _LOCK:
         _purge_expired()
-        item = _PENDING.pop(str(pending_id or ""), None)
+        key = str(pending_id or "")
+        item = _PENDING.get(key)
+        if item and principal is not None and item.get("principal") != principal:
+            raise ShadowPcError("Pending action belongs to another account")
+        if item:
+            _PENDING.pop(key, None)
     if not item:
         raise ShadowPcError("Pending action was not found or has expired")
-    _audit(item["action"], "cancelled", requested_by=item.get("requested_by", "web"), args=item.get("args") or {})
+    _audit(
+        item["action"],
+        "cancelled",
+        requested_by=item.get("requested_by", "web"),
+        principal=item.get("principal"),
+        args=item.get("args") or {},
+    )
     return {"status": "cancelled", "action": item["action"]}
 
 
@@ -652,12 +707,12 @@ def _status_snapshot() -> tuple[dict[str, Any], float]:
     return pc, 0.0
 
 
-def overview() -> dict[str, Any]:
+def overview(principal: str | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {
         "configured": configured(),
         "online": False,
         "demo": _demo_enabled(),
-        "pending": list_pending(),
+        "pending": list_pending(principal=principal),
         "actions": {"read": sorted(READ_ACTIONS), "confirm": sorted(WRITE_ACTIONS)},
         "runbooks": list_runbooks(),
         "risk_levels": _ACTION_RISK,
@@ -682,9 +737,19 @@ def tool_action(content: str, *, requested_by: str) -> dict[str, Any]:
         payload = json.loads(content or "{}")
     except json.JSONDecodeError:
         return {"error": "pc_control expects JSON arguments", "exit_code": 1}
+    action = str(payload.get("action") or "").strip().lower()
+    principal = requested_by.partition(":")[2].strip().lower() if ":" in requested_by else ""
     try:
-        result = request_action(payload.get("action"), payload.get("args"), requested_by=requested_by)
-    except ShadowPcError as exc:
+        from src.shadow_access import ShadowAccessError, require_permission
+
+        require_permission(principal, "view" if action in READ_ACTIONS else "control")
+        result = request_action(
+            action,
+            payload.get("args"),
+            requested_by=requested_by,
+            principal=principal,
+        )
+    except (ShadowPcError, ShadowAccessError) as exc:
         return {"error": str(exc), "exit_code": 1}
     if result.get("status") == "pending_confirmation":
         pending = result["pending"]

@@ -626,3 +626,120 @@
   outline: 2px solid var(--brand-color, var(--red));
   outline-offset: 3px;
 }
+
+
+/* Account-scoped linked-PC access */
+.command-access-state,
+.command-access-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.command-access-state > div:first-child,
+.command-access-row > div:first-child {
+  min-width: 0;
+}
+
+.command-access-state strong,
+.command-access-row strong {
+  display: block;
+  color: var(--fg);
+}
+
+.command-access-state small,
+.command-access-row small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  color: var(--fg-muted, var(--color-subheader));
+}
+
+.command-access-state.denied {
+  padding: 14px;
+  border: 1px solid rgba(255, 190, 88, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 190, 88, 0.06);
+}
+
+.command-access-request {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.command-access-request label {
+  color: var(--fg-muted, var(--color-subheader));
+  font: 12px ui-monospace, "JetBrains Mono", monospace;
+}
+
+.command-access-pending {
+  color: #ffd48a;
+  font: 12px ui-monospace, "JetBrains Mono", monospace;
+}
+
+.command-access-admin {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.command-access-row {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.command-chip.static {
+  display: inline-flex;
+  cursor: default;
+}
+
+.command-mini.approve {
+  border-color: rgba(57,217,138,0.65);
+  color: #77e7ad;
+}
+
+.command-pair-code {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--brand-color, var(--red)) 55%, var(--border));
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.command-pair-code[hidden] {
+  display: none;
+}
+
+.command-pair-code strong {
+  color: var(--brand-color, var(--red));
+  font: 16px ui-monospace, "JetBrains Mono", monospace;
+  user-select: all;
+}
+
+.command-pair-code small {
+  color: var(--fg-muted, var(--color-subheader));
+}
+
+@media (max-width: 760px) {
+  .command-access-state,
+  .command-access-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .command-access-request {
+    justify-content: flex-start;
+  }
+}

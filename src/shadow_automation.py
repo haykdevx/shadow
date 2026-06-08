@@ -69,9 +69,14 @@ def delete_automation(automation_id: str) -> dict[str, Any]:
     return {"ok": True, "id": automation_id}
 
 
-def evaluate_automations(*, automation_id: str | None = None, requested_by: str = "automation") -> dict[str, Any]:
+def evaluate_automations(
+    *,
+    automation_id: str | None = None,
+    requested_by: str = "automation",
+    principal: str | None = None,
+) -> dict[str, Any]:
     rows = _read_rows()
-    snapshot = overview()
+    snapshot = overview(principal=principal)
     now = time.time()
     events: list[dict[str, Any]] = []
     changed = False
@@ -89,7 +94,7 @@ def evaluate_automations(*, automation_id: str | None = None, requested_by: str 
             events.append({"id": item["id"], "name": item["name"], "status": "idle", "detail": detail})
             continue
         try:
-            result = _request_automation_action(item, requested_by=requested_by)
+            result = _request_automation_action(item, requested_by=requested_by, principal=principal)
             item["last_run_at"] = now
             item["last_status"] = result.get("status") or "requested"
             item["last_detail"] = detail
@@ -107,19 +112,34 @@ def evaluate_automations(*, automation_id: str | None = None, requested_by: str 
     return {"ok": True, "events": events, "snapshot": {"online": snapshot.get("online"), "demo": snapshot.get("demo")}}
 
 
-def _request_automation_action(item: dict[str, Any], *, requested_by: str) -> dict[str, Any]:
+def _request_automation_action(
+    item: dict[str, Any],
+    *,
+    requested_by: str,
+    principal: str | None,
+) -> dict[str, Any]:
     action = item.get("action") or {}
     action_type = str(action.get("type") or "").strip().lower()
     if action_type == "runbook":
         name = str(action.get("name") or "").strip()
         if not name:
             raise ShadowPcError("Automation runbook action needs a name")
-        return request_action("runbook", {"name": name}, requested_by=f"{requested_by}:{item['name']}")
+        return request_action(
+            "runbook",
+            {"name": name},
+            requested_by=f"{requested_by}:{item['name']}",
+            principal=principal,
+        )
     if action_type == "pc_action":
         pc_action = str(action.get("action") or "").strip().lower()
         if pc_action not in ALL_ACTIONS:
             raise ShadowPcError(f"Unsupported automation PC action: {pc_action or '(missing)'}")
-        return request_action(pc_action, action.get("args") or {}, requested_by=f"{requested_by}:{item['name']}")
+        return request_action(
+            pc_action,
+            action.get("args") or {},
+            requested_by=f"{requested_by}:{item['name']}",
+            principal=principal,
+        )
     raise ShadowPcError("Automation action type must be runbook or pc_action")
 
 

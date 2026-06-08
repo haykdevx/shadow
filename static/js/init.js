@@ -63,8 +63,7 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
       hideOn('#tool-research-btn, #research-toggle-btn', privs.can_use_research);
       // Memory & skills (rail/tool button only — UI/API entry).
       hideOn('#tool-memory-btn', privs.can_manage_memory);
-      // Machine control is admin-only server-side; hide the entry for non-admins.
-      hideOn('#tool-command-btn', data && data.is_admin !== false);
+      // Command stays visible so authenticated users can request explicit linked-PC access.
       // Agent mode toggle — force chat mode by hiding the Agent toggle button.
       if (privs.can_use_agent === false) {
         const _agent = document.getElementById('mode-agent-btn');

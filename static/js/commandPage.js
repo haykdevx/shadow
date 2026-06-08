@@ -7,6 +7,7 @@ let refreshTimer = null;
 let currentPath = '';
 let lastReadFile = null;
 let latest = {
+  access: null,
   overview: null,
   processes: null,
   windows: null,
@@ -146,6 +147,7 @@ function buildShell() {
       </header>
 
       <div class="command-grid">
+        ${panel('access', 'Device Access', 'account-scoped permissions', true)}
         ${panel('vitals', 'Host / Vitals', 'live telemetry')}
         ${panel('screen', 'Screen', 'live-ish capture')}
         ${panel('processes', 'Processes', 'top CPU/RAM')}
@@ -173,9 +175,9 @@ function buildShell() {
   return node;
 }
 
-function panel(id, title, sub) {
+function panel(id, title, sub, wide = false) {
   return `
-    <section class="command-panel" data-command-panel="${esc(id)}">
+    <section class="command-panel${wide ? ' command-panel-wide' : ''}" data-command-panel="${esc(id)}">
       <div class="command-panel-head">
         <div>
           <div class="command-panel-title">${esc(title)}</div>
@@ -193,6 +195,160 @@ function panel(id, title, sub) {
 function setState(id, online) {
   const el = root?.querySelector(`[data-panel-state="${id}"]`);
   if (el) el.dataset.online = online ? '1' : '0';
+}
+
+function permissionList(perms = {}) {
+  return ['view', 'control', 'approve']
+    .filter((name) => perms[name])
+    .map((name) => `<span class="command-chip static">${esc(name)}</span>`)
+    .join('') || '<span class="command-muted">none</span>';
+}
+
+function setAccessLocked(locked) {
+  root?.querySelectorAll('[data-command-panel]').forEach((node) => {
+    if (node.dataset.commandPanel !== 'access') node.hidden = locked;
+  });
+  root?.querySelectorAll('.command-top-actions [data-command-action]').forEach((node) => {
+    if (node.dataset.commandAction !== 'close') node.hidden = locked;
+  });
+}
+
+function renderAccess(data) {
+  latest.access = data;
+  const perms = data?.permissions || {};
+  const canView = Boolean(perms.view);
+  setAccessLocked(!canView);
+
+  if (!data?.configured) {
+    setBody('access', `
+      <div class="command-access-state">
+        <div><strong>No linked-PC owner configured</strong><small>An administrator must claim this PC before any account can access it.</small></div>
+        <button type="button" class="command-btn approve" data-access-action="claim">Claim linked PC</button>
+      </div>`);
+    return false;
+  }
+
+  if (!canView) {
+    const requested = data?.request?.permissions || {};
+    setBody('access', `
+      <div class="command-access-state denied">
+        <div>
+          <strong>This account cannot access the linked PC</strong>
+          <small>Signed in as ${esc(data.username)}. Request only the permissions you need; the PC owner must approve them.</small>
+        </div>
+        <div class="command-access-request">
+          <label><input type="checkbox" data-access-permission="view" checked disabled> view status</label>
+          <label><input type="checkbox" data-access-permission="control" ${requested.control ? 'checked' : ''}> control PC</label>
+          <label><input type="checkbox" data-access-permission="approve" ${requested.approve ? 'checked' : ''}> approve actions</label>
+          <button type="button" class="command-btn approve" data-access-action="request">${data.request ? 'Update request' : 'Request access'}</button>
+        </div>
+        ${data.request ? '<span class="command-access-pending">Request pending owner approval.</span>' : ''}
+      </div>`);
+    return false;
+  }
+
+  const requests = Array.isArray(data.requests) ? data.requests : [];
+  const grants = Array.isArray(data.grants) ? data.grants : [];
+  const ownerAdmin = perms.owner ? `
+    <div class="command-access-admin">
+      <div class="command-panel-sub">Pending requests</div>
+      ${requests.map((row) => `
+        <div class="command-access-row">
+          <div><strong>${esc(row.username)}</strong><small>${permissionList(row.permissions)}</small></div>
+          <div class="command-inline-actions">
+            <button type="button" class="command-mini" data-access-grant="${esc(row.username)}" data-access-level="view">View</button>
+            <button type="button" class="command-mini" data-access-grant="${esc(row.username)}" data-access-level="control">Control</button>
+            <button type="button" class="command-mini approve" data-access-grant="${esc(row.username)}" data-access-level="approve">Full</button>
+          </div>
+        </div>`).join('') || '<div class="command-empty">No pending access requests.</div>'}
+      <div class="command-panel-sub">Active grants</div>
+      ${grants.map((row) => `
+        <div class="command-access-row">
+          <div><strong>${esc(row.username)}</strong><small>${permissionList(row.permissions)}</small></div>
+          <button type="button" class="command-mini danger" data-access-revoke="${esc(row.username)}">Revoke</button>
+        </div>`).join('') || '<div class="command-empty">No delegated accounts.</div>'}
+    </div>` : '';
+
+  setBody('access', `
+    <div class="command-access-state allowed">
+      <div>
+        <strong>${perms.owner ? 'Linked-PC owner' : 'Linked-PC access granted'}</strong>
+        <small>Account ${esc(data.username)} · ${permissionList(perms)}</small>
+      </div>
+      <div class="command-inline-actions">
+        <button type="button" class="command-btn" data-access-action="telegram">Generate Telegram pairing code</button>
+        ${data.telegram_linked ? '<button type="button" class="command-btn danger" data-access-action="telegram-unlink">Unlink Telegram</button>' : ''}
+      </div>
+    </div>
+    <div class="command-pair-code" data-command-pair-code hidden></div>
+    ${ownerAdmin}`);
+  return true;
+}
+
+async function refreshAccess() {
+  try {
+    const data = await request('/access');
+    setNote('access', '');
+    setState('access', true);
+    return renderAccess(data);
+  } catch (error) {
+    setAccessLocked(true);
+    setBody('access', '<div class="command-empty">Access state unavailable.</div>');
+    setNote('access', error.message, 'error');
+    setState('access', false);
+    return false;
+  }
+}
+
+async function requestPcAccess() {
+  const permissions = ['view'];
+  root.querySelectorAll('[data-access-permission]:checked').forEach((input) => {
+    if (!permissions.includes(input.dataset.accessPermission)) permissions.push(input.dataset.accessPermission);
+  });
+  try {
+    await request('/access/request', { method: 'POST', body: JSON.stringify({ permissions }) });
+    toast('Access request sent to the linked-PC owner');
+    await refreshAccess();
+  } catch (error) {
+    toast(`Access request failed: ${error.message}`, true);
+  }
+}
+
+async function grantPcAccess(username, level) {
+  const permissions = level === 'approve' ? ['view', 'control', 'approve'] : (level === 'control' ? ['view', 'control'] : ['view']);
+  try {
+    await request(`/access/grants/${encodeURIComponent(username)}`, {
+      method: 'POST',
+      body: JSON.stringify({ permissions }),
+    });
+    toast(`Linked-PC access granted to ${username}`);
+    await refreshAccess();
+  } catch (error) {
+    toast(`Grant failed: ${error.message}`, true);
+  }
+}
+
+async function revokePcAccess(username) {
+  try {
+    await request(`/access/grants/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    toast(`Linked-PC access revoked from ${username}`);
+    await refreshAccess();
+  } catch (error) {
+    toast(`Revoke failed: ${error.message}`, true);
+  }
+}
+
+async function createTelegramPairCode() {
+  try {
+    const data = await request('/telegram/pair-code', { method: 'POST' });
+    const node = root.querySelector('[data-command-pair-code]');
+    if (node) {
+      node.hidden = false;
+      node.innerHTML = `<strong>/pair ${esc(data.code)}</strong><small>Send this to your Shadow Telegram bot within 10 minutes. The code works once.</small>`;
+    }
+  } catch (error) {
+    toast(`Telegram pairing failed: ${error.message}`, true);
+  }
 }
 
 function renderPending(rows = []) {
@@ -696,7 +852,9 @@ async function captureScreen() {
   }
 }
 
-async function refreshAll({ includeScreen = false } = {}) {
+async function refreshAll({ includeScreen = false, skipAccess = false } = {}) {
+  if (!skipAccess && !(await refreshAccess())) return;
+  if (!latest.access?.permissions?.view) return;
   await Promise.allSettled([
     refreshOverview(),
     refreshProcesses(),
@@ -911,6 +1069,29 @@ function bindEvents() {
     const target = event.target.closest('button, .command-file, .command-chip, label');
     if (!target) return;
 
+    const accessAction = target.dataset.accessAction;
+    if (accessAction === 'request') return requestPcAccess();
+    if (accessAction === 'claim') {
+      try {
+        await request('/access/claim', { method: 'POST' });
+        return bootstrapPage();
+      } catch (error) {
+        return toast(`Owner claim failed: ${error.message}`, true);
+      }
+    }
+    if (accessAction === 'telegram') return createTelegramPairCode();
+    if (accessAction === 'telegram-unlink') {
+      try {
+        await request('/telegram/link', { method: 'DELETE' });
+        toast('Telegram account unlinked');
+        return refreshAccess();
+      } catch (error) {
+        return toast(`Telegram unlink failed: ${error.message}`, true);
+      }
+    }
+    if (target.dataset.accessGrant) return grantPcAccess(target.dataset.accessGrant, target.dataset.accessLevel || 'view');
+    if (target.dataset.accessRevoke) return revokePcAccess(target.dataset.accessRevoke);
+
     const approveId = target.dataset.pendingApprove;
     if (approveId) return approvePending(approveId);
     const cancelId = target.dataset.pendingCancel;
@@ -1019,6 +1200,7 @@ function bindEvents() {
 
 function startTimers() {
   stopTimers();
+  if (!latest.access?.permissions?.view) return;
   refreshTimer = setInterval(() => {
     if (!document.hidden && root && !root.hidden) refreshAll({ includeScreen: false });
   }, REFRESH_MS);
@@ -1038,14 +1220,21 @@ function ensureRoot() {
   return root;
 }
 
+async function bootstrapPage() {
+  stopTimers();
+  const allowed = await refreshAccess();
+  if (!allowed) return;
+  startTimers();
+  await refreshAll({ includeScreen: false, skipAccess: true });
+}
+
 function openPage(options = {}) {
   const push = options.push !== false;
   const node = ensureRoot();
   node.hidden = false;
   document.body.classList.add('command-page-open');
   if (push) navTo('/command');
-  startTimers();
-  refreshAll({ includeScreen: false });
+  bootstrapPage();
 }
 
 function closePage() {
@@ -1061,8 +1250,7 @@ function init() {
     if (!root || root.hidden) return;
     if (document.hidden) stopTimers();
     else {
-      startTimers();
-      refreshAll({ includeScreen: false });
+      bootstrapPage();
     }
   });
   window.addEventListener('popstate', () => {

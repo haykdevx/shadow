@@ -36,7 +36,8 @@ Security fixes are handled on the default branch until formal releases are cut.
 - Use a random `SHADOW_HOME_AGENT_TOKEN` of at least 32 characters and store it only in mode-600 environment files.
 - The companion exposes an allowlisted action API, not a general-purpose shell.
 - Read-only actions execute directly. State-changing actions require an explicit short-lived approval.
-- Browser approval requires an interactive admin session; internal tool and bearer API tokens cannot self-approve.
+- Set `SHADOW_PC_OWNER` to the intended Shadow username. Admin status alone does not grant linked-PC access; all other accounts default to deny and need explicit `view`, `control`, and/or `approve` grants.
+- Pending actions, audit events, the AI `pc_control` tool, and Telegram identities are scoped to the linked Shadow account. Browser approval requires an interactive account with `approve`; internal tool and bearer API tokens cannot self-approve.
 - Screenshots are captured into a temporary file, returned to the authenticated caller, and deleted immediately.
 
 ## Publishing A Fork
