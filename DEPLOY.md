@@ -157,6 +157,63 @@ Lock, typing, keypresses, clipboard writes, media, volume, and application
 control wait for explicit approval. App launching is label-based and restricted
 by `SHADOW_ALLOWED_APPS` on the home PC.
 
+## 5. Telegram Client (MTProto — real user account)
+
+Shadow can act as a full Telegram client (like Telegram Desktop) using
+[Telethon](https://github.com/LonamiWebs/Telethon) over the MTProto protocol.
+Each Shadow user logs into their own personal Telegram account from the UI
+(phone number → one-time code → optional 2FA password).
+
+### 5.1 Get API credentials
+
+1. Visit <https://my.telegram.org> and log in with your personal phone number.
+2. Go to **API development tools** and create an application (name and
+   platform do not matter).
+3. Copy **App api_id** (integer) and **App api_hash** (hex string).
+
+These are operator-level credentials shared by all Shadow users on this
+instance. They do **not** grant access to anyone's messages — each user still
+authenticates with their own account.
+
+### 5.2 Configure
+
+Add to your `.env`:
+
+```dotenv
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=0123456789abcdef0123456789abcdef
+```
+
+Optionally override storage paths (defaults shown):
+
+```dotenv
+TELEGRAM_SESSIONS_PATH=data/telegram-sessions
+TELEGRAM_CACHE_PATH=data/telegram-cache
+```
+
+Restart Shadow:
+
+```bash
+docker compose up -d --build
+```
+
+### 5.3 Per-user login
+
+Open Shadow → **Telegram** tab → enter your phone number → enter the code
+Telegram sends you → enter your 2FA cloud password if prompted. Sessions are
+persisted under `data/telegram-sessions/<slug>.session` and survive restarts.
+Log out from the UI to remove the session file.
+
+### 5.4 Notes
+
+- The bot-bridge (`SHADOW_TELEGRAM_BOT_TOKEN` / `--profile telegram`) is a
+  separate feature for PC-control notifications and is not affected by this.
+- Avatar and media files are cached under `data/telegram-cache/`. They are
+  not automatically purged; remove the directory to reclaim space.
+- Telethon keeps one long-lived connection per logged-in Shadow user to
+  receive real-time updates (new messages, edits, read receipts). The UI
+  polls `/api/telegram/updates` to drain these events.
+
 ## 5. Optional Telegram Remote
 
 Create a bot with BotFather. The bridge is PC-control only and does not need a Shadow chat API token.

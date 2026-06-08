@@ -715,6 +715,9 @@ app.include_router(setup_shadow_routes())
 from routes.music_routes import setup_music_routes
 app.include_router(setup_music_routes())
 
+from routes.telegram_routes import setup_telegram_routes
+app.include_router(setup_telegram_routes())
+
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:

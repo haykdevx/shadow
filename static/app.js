@@ -21,7 +21,7 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import commandPageModule from './js/commandPage.js';
-import telegramInboxModule from './js/telegramInbox.js';
+import telegramModule from './js/telegram.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
@@ -56,7 +56,7 @@ window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
 window.magiModule = magiModule;
 window.commandPageModule = commandPageModule;
-window.telegramInboxModule = telegramInboxModule;
+window.telegramModule = telegramModule;
 
 // Redirect to login on 401 from any fetch
 const _origFetch = window.fetch;
@@ -1006,7 +1006,7 @@ function initializeEventListeners() {
     },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
     '/command':  () => commandPageModule && commandPageModule.openPage({ push: false }),
-    '/telegram': () => telegramInboxModule && telegramInboxModule.openPage({ push: false }),
+    '/telegram': () => telegramModule && telegramModule.openPage({ push: false }),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
@@ -3989,7 +3989,7 @@ function startShadowApp() {
   // Ensure proper initial state
   voiceRecorderModule.init();
   commandPageModule.init();
-  telegramInboxModule.init();
+  telegramModule.init();
   if (censorModule) censorModule.init();
 
   // Auto-focus message input on load

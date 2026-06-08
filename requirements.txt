@@ -49,3 +49,5 @@ yt-dlp[default]
 bgutil-ytdlp-pot-provider
 pytest
 pytest-asyncio
+# MTProto Telegram user-account client (real chats, not just bot API)
+telethon

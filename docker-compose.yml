@@ -72,6 +72,10 @@ services:
       # Find yours with:  id -u  /  id -g
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID:-}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-}
+      - TELEGRAM_SESSIONS_PATH=${TELEGRAM_SESSIONS_PATH:-data/telegram-sessions}
+      - TELEGRAM_CACHE_PATH=${TELEGRAM_CACHE_PATH:-data/telegram-cache}
     depends_on:
       searxng:
         condition: service_healthy
