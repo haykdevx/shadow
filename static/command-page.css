@@ -743,3 +743,22 @@
     justify-content: flex-start;
   }
 }
+
+
+/* Account-owned device enrollment */
+.command-device-head,.command-device-row,.command-device-select,.command-install-row{display:flex;align-items:center;gap:12px}
+.command-device-head,.command-device-row{justify-content:space-between}
+.command-device-head strong,.command-device-select strong,.command-enrollment-copy strong,.command-install-row strong{display:block}
+.command-device-head small,.command-device-select small,.command-enrollment-copy small,.command-install-row small{display:block;margin-top:4px;color:var(--fg-muted,var(--color-subheader));font-size:11px}
+.command-device-list{display:grid;gap:8px;margin-top:14px}
+.command-device-row{padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.16)}
+.command-device-row.selected{border-color:color-mix(in srgb,var(--brand-color,var(--red)) 65%,var(--border))}
+.command-device-select{min-width:0;flex:1;border:0;background:transparent;color:var(--fg);cursor:pointer;text-align:left}
+.command-device-status{width:9px;height:9px;flex:0 0 auto;border-radius:999px;background:#5d6872}
+.command-device-status[data-online="1"]{background:#39d98a;box-shadow:0 0 14px rgba(57,217,138,.5)}
+.command-enrollment{display:grid;gap:10px;margin-top:14px;padding:12px;border:1px solid color-mix(in srgb,var(--brand-color,var(--red)) 34%,var(--border));border-radius:6px;background:rgba(0,0,0,.2)}
+.command-enrollment[hidden]{display:none}
+.command-os-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.command-install-row{display:grid;grid-template-columns:150px minmax(0,1fr) auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.18)}
+.command-install-row code{min-width:0;overflow:auto;padding:8px;border-radius:5px;background:rgba(0,0,0,.32);color:var(--fg);font-size:11px;white-space:nowrap}
+@media(max-width:720px){.command-device-head,.command-device-row,.command-install-row{display:grid;grid-template-columns:1fr}}

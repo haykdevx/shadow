@@ -41,6 +41,10 @@ services:
       - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
       - SHADOW_PC_OWNER=${SHADOW_PC_OWNER:-}
       - SHADOW_PC_ACCESS_PATH=${SHADOW_PC_ACCESS_PATH:-data/shadow-pc-access.json}
+      - SHADOW_DEVICES_PATH=${SHADOW_DEVICES_PATH:-data/shadow-devices.json}
+      - SHADOW_DEVICE_JOBS_PATH=${SHADOW_DEVICE_JOBS_PATH:-data/shadow-device-jobs.json}
+      - SHADOW_TELEGRAM_STORE_PATH=${SHADOW_TELEGRAM_STORE_PATH:-data/shadow-telegram-chats.json}
+      - SHADOW_TELEGRAM_BOT_TOKEN=${SHADOW_TELEGRAM_BOT_TOKEN:-}
       - SHADOW_ADMIN_USER=${SHADOW_ADMIN_USER:-admin}
       - SHADOW_ADMIN_PASSWORD=${SHADOW_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
@@ -83,7 +87,6 @@ services:
       - ./data:/app/data:z
     environment:
       - SHADOW_TELEGRAM_BOT_TOKEN=${SHADOW_TELEGRAM_BOT_TOKEN:-}
-      - SHADOW_TELEGRAM_ALLOWED_USER_IDS=${SHADOW_TELEGRAM_ALLOWED_USER_IDS:-}
       - SHADOW_HOME_AGENT_URL=${SHADOW_HOME_AGENT_URL:-}
       - SHADOW_HOME_AGENT_SOCKET=${SHADOW_HOME_AGENT_SOCKET:-}
       - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
@@ -91,6 +94,9 @@ services:
       - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
       - SHADOW_PC_OWNER=${SHADOW_PC_OWNER:-}
       - SHADOW_PC_ACCESS_PATH=${SHADOW_PC_ACCESS_PATH:-data/shadow-pc-access.json}
+      - SHADOW_DEVICES_PATH=${SHADOW_DEVICES_PATH:-data/shadow-devices.json}
+      - SHADOW_DEVICE_JOBS_PATH=${SHADOW_DEVICE_JOBS_PATH:-data/shadow-device-jobs.json}
+      - SHADOW_TELEGRAM_STORE_PATH=${SHADOW_TELEGRAM_STORE_PATH:-data/shadow-telegram-chats.json}
     depends_on:
       - shadow
     restart: unless-stopped

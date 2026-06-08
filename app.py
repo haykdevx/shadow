@@ -164,11 +164,18 @@ if AUTH_ENABLED:
         "/api/auth/features",
         "/api/auth/settings",
         "/api/auth/integrations/presets",
+        "/api/shadow/device/enroll",
+        "/api/shadow/device/poll",
+        "/api/shadow/device/result",
         "/api/health",
         "/api/version",
         "/login",
     }
-    AUTH_EXEMPT_PREFIXES = ["/static"]
+    AUTH_EXEMPT_PREFIXES = [
+        "/static",
+        "/api/shadow/device/install/",
+        "/api/shadow/device/source/",
+    ]
     # Dynamic paths whose own handler proves identity via a path-embedded
     # secret instead of the session/bearer auth. The route handler at
     # routes/task_routes.py validates the per-task `webhook_token` itself
@@ -754,6 +761,14 @@ async def serve_memory(request: Request):
 
 @app.get("/gallery")
 async def serve_gallery(request: Request):
+    return await serve_index(request)
+
+@app.get("/command")
+async def serve_command(request: Request):
+    return await serve_index(request)
+
+@app.get("/telegram")
+async def serve_telegram(request: Request):
     return await serve_index(request)
 
 @app.get("/tasks")

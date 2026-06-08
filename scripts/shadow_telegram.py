@@ -20,8 +20,10 @@ from src.shadow_access import (
     ShadowAccessError,
     consume_telegram_pair_code,
     telegram_identity,
+    telegram_identity_for_chat,
     unlink_telegram,
 )
+from src.shadow_telegram_store import record_message
 from src.shadow_pc import ShadowPcError, cancel_action, confirm_action, list_pending, request_action
 
 
@@ -40,29 +42,11 @@ HELP = """Shadow PC control
 /unlink - disconnect this Telegram account"""
 
 
-def _allowlist() -> set[int]:
-    values = os.getenv("SHADOW_TELEGRAM_ALLOWED_USER_IDS", "")
-    out: set[int] = set()
-    for value in values.split(","):
-        try:
-            out.add(int(value.strip()))
-        except ValueError:
-            pass
-    return out
-
-
-def _allowlisted(user_id: int) -> bool:
-    configured = _allowlist()
-    return not configured or user_id in configured
-
-
-def _identity(user_id: int, permission: str) -> dict[str, Any] | None:
-    if not _allowlisted(user_id):
-        return None
-    identity = telegram_identity(user_id)
-    if not identity or not (identity.get("permissions") or {}).get(permission):
-        return None
-    return identity
+def _identity(user_id: int, permission: str = "view") -> dict[str, Any] | None:
+    # Pairing itself is the authorization boundary. A static deployment-wide
+    # allowlist would prevent legitimate Shadow accounts from pairing their own
+    # Telegram identity, so linked identities are resolved account-by-account.
+    return telegram_identity(user_id)
 
 
 def _tg(method: str, *, files: dict[str, Any] | None = None, **params: Any) -> dict[str, Any]:
@@ -82,24 +66,32 @@ def _tg(method: str, *, files: dict[str, Any] | None = None, **params: Any) -> d
 
 def _send(chat_id: int, message: str, *, keyboard: dict[str, Any] | None = None) -> None:
     text = str(message or "[no output]")
+    identity = telegram_identity_for_chat(chat_id)
     while text:
         chunk, text = text[:3900], text[3900:]
         params: dict[str, Any] = {"chat_id": chat_id, "text": chunk}
         if keyboard and not text:
             params["reply_markup"] = keyboard
-        _tg("sendMessage", **params)
+        sent = _tg("sendMessage", **params)
+        if identity and sent.get("ok"):
+            result = sent.get("result") or {}
+            record_message(identity["username"], chat_id, "out", chunk, telegram_message_id=result.get("message_id"))
 
 
 def _send_photo(chat_id: int, payload: dict[str, Any]) -> None:
     raw = base64.b64decode(payload.get("image_b64") or "")
     if not raw:
         raise ShadowPcError("Home PC returned an empty screenshot")
-    _tg(
+    sent = _tg(
         "sendPhoto",
         chat_id=str(chat_id),
         caption="Shadow screen",
         files={"photo": ("shadow-screen.png", raw, payload.get("mime") or "image/png")},
     )
+    identity = telegram_identity_for_chat(chat_id)
+    if identity and sent.get("ok"):
+        result = sent.get("result") or {}
+        record_message(identity["username"], chat_id, "out", "[Screen capture]", telegram_message_id=result.get("message_id"))
 
 
 def _approval_keyboard(pending_id: str) -> dict[str, Any]:
@@ -182,12 +174,11 @@ def _handle_clip(chat_id: int, username: str, rest: str) -> None:
         _send(chat_id, "Usage: /clip get  OR  /clip set <text>")
 
 
-def _handle_pair(chat_id: int, user_id: int, code: str) -> None:
-    if not _allowlisted(user_id):
-        _send(chat_id, "Not authorized user.")
-        return
+def _handle_pair(chat_id: int, user_id: int, code: str, message: dict[str, Any] | None = None) -> None:
     try:
         result = consume_telegram_pair_code(code, user_id, chat_id)
+        source = message or {}
+        record_message(result["username"], chat_id, "in", str(source.get("text") or f"/pair {code}"), telegram_message_id=source.get("message_id"), chat=source.get("chat"), sender=source.get("from"))
         _send(chat_id, f"Paired with Shadow account {result['username']}.\n\n{HELP}")
     except ShadowAccessError:
         _send(chat_id, "Pairing code is invalid or expired.")
@@ -203,7 +194,7 @@ def _handle_message(message: dict[str, Any]) -> None:
     cmd, _, rest = body.partition(" ")
     cmd = cmd.lower()
     if cmd == "/pair" and rest.strip():
-        _handle_pair(chat_id, user_id, rest.strip())
+        _handle_pair(chat_id, user_id, rest.strip(), message)
         return
 
     permission = "approve" if cmd in {"/pending", "/approve", "/cancel"} else (
@@ -214,6 +205,7 @@ def _handle_message(message: dict[str, Any]) -> None:
         _send(chat_id, "Not authorized user.")
         return
     username = identity["username"]
+    record_message(username, chat_id, "in", body, telegram_message_id=message.get("message_id"), chat=message.get("chat"), sender=message.get("from"))
 
     if cmd in {"/start", "/help"}:
         _send(chat_id, HELP)

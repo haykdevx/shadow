@@ -34,9 +34,9 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 - **Music** — a free, full-catalog player (search, queue, playlists, liked songs, now-playing bar, OS media-key support) streaming through a resilient YouTube pipeline. See [Music pipeline](#music-pipeline).
 
 **System control**
-- **Command** — a dashboard for a linked Linux PC: vitals, screenshots, processes, files, windows, runbooks, and an approvals queue.
-- Allowlisted home-PC companion intended for **Tailscale-only** access, with explicit confirmation gates for lock, typing, keypress, clipboard, media, volume, and app control.
-- Optional **Telegram** PC remote paired with a one-time code; it inherits the linked Shadow account's `view`, `control`, and `approve` permissions.
+- **Command** — every Shadow account can enroll its own Linux, macOS, or Windows PC with a one-line installer, then access vitals, screenshots, processes, files, windows, runbooks, and approvals.
+- The account-owned device agent connects outbound over HTTPS; it opens no home-router port. Destructive actions remain server- and device-gated behind explicit confirmation.
+- **Telegram inbox + remote** — pair one Telegram identity to one Shadow account. Bot chats appear inside Shadow and commands can control only that account's enrolled PCs.
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 
@@ -102,8 +102,8 @@ The player is **YouTube-backed** and engineered to survive YouTube's anti-bot me
 - **Cookies** (`data/music/cookies.txt`, git-ignored) authenticate requests so they pass even from a datacenter IP.
 - The frontend uses one persistent `<audio>` element (playback survives minimizing the window) and the **Media Session API** so laptop media keys & lock-screen controls work.
 
-### Home-PC companion
-A separate allowlisted service (`companion/`) intended to run on your home machine and be reachable **only over Tailscale**. Every privileged action (`pc_control`) is gated behind an explicit approval; the native tool is blocked for non-admin users.
+### Account-owned device companion
+Open **Command**, create a single-use setup code, and run the generated command on Linux, macOS, or Windows. The installed `companion/relay_agent.py` starts at login and long-polls Shadow over HTTPS, so the PC needs no inbound port. Device credentials are stored hashed on the server; device lists, jobs, pending approvals, audit events, and Telegram commands are owner-scoped. The older Tailscale home-agent URL remains only as a migration adapter for `SHADOW_PC_OWNER`.
 
 ### Deployment
 - **Docker Compose**, single command. The image (`python:3.12-slim`) bundles Node, Deno, `tmux`, `gosu`, and OpenSSH; the entrypoint drops to `PUID/PGID` (default `1000:1000`) and repairs bind-mount ownership.
@@ -194,7 +194,8 @@ All runtime configuration lives in `.env` (copy from `.env.example`). Common key
 | `DATABASE_URL` | SQLAlchemy URL (default SQLite under `data/`) |
 | `SHADOW_ADMIN_USER` / `SHADOW_ADMIN_PASSWORD` | pre-seed the first-boot admin |
 | `ALLOWED_ORIGINS` | comma-separated allowed origins for cookies/CORS |
-| `SHADOW_HOME_AGENT_URL` / `_TOKEN` | link to the home-PC companion |
+| `SHADOW_PC_OWNER` + `SHADOW_HOME_AGENT_*` | optional legacy single-device migration adapter |
+| `SHADOW_TELEGRAM_BOT_TOKEN` | enables the account-scoped Telegram remote and web inbox |
 | `MUSIC_COOKIES_FILE` | path to the YouTube cookies file (default `data/music/cookies.txt`) |
 
 ---
@@ -216,9 +217,10 @@ Each `shadow-<name>` script is a standalone CLI; symlink `scripts/shadow` onto y
 
 ## Security model
 
-- Single-operator by design; **keep `AUTH_ENABLED=true`** whenever bound outside loopback, and never expose the app port directly to the public internet — front it with the nginx + TLS setup in [DEPLOY.md](DEPLOY.md).
+- Multi-account data is owner-scoped; **keep `AUTH_ENABLED=true`** whenever bound outside loopback, and never expose the app port directly to the public internet — front it with the nginx + TLS setup in [DEPLOY.md](DEPLOY.md).
 - Cookie sessions + bcrypt + optional **TOTP 2FA**; scoped, revocable API tokens for paired clients.
-- Home-PC control is opt-in and **Tailscale-only**. `SHADOW_PC_OWNER` owns the device; every other account defaults to no access and needs explicit `view`, `control`, and/or `approve` grants. The dashboard, AI tool, pending queue, audit timeline, and Telegram bridge all enforce the same account scope.
+- PC control is opt-in and account-owned. Enrollment codes are short-lived and single-use; device tokens are hashed server-side; foreign device IDs are rejected; no user can request or inherit access to another user's PC. The legacy bridge is visible only to the exact `SHADOW_PC_OWNER` username.
+- Telegram pairing maps one Telegram identity to one Shadow account. The web inbox returns only that owner's bot conversations; it is not a personal Telegram/MTProto client.
 - Secrets and runtime data (`.env`, `data/`, cookies) are git-ignored and never committed.
 
 ---

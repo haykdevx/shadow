@@ -1,4 +1,8 @@
-"""Per-account access control for Shadow's linked home PC and Telegram bridge."""
+"""Per-account Telegram pairing.
+
+PC ownership lives in :mod:`src.shadow_devices`: every Shadow account enrolls
+and owns its own machines. Cross-account PC grants are no longer exposed.
+"""
 
 from __future__ import annotations
 
@@ -129,11 +133,11 @@ def require_permission(username: str, permission: str) -> str:
     username = _username(username)
     if permission not in VALID_PERMISSIONS:
         raise ShadowAccessError("Unknown PC permission")
-    owner = owner_username()
-    if not owner:
-        raise ShadowAccessError("Linked-PC ownership is not configured")
-    if not permissions_for(username).get(permission):
-        raise ShadowAccessError(f"Your account does not have linked-PC {permission} permission")
+    try:
+        from src.shadow_devices import get_device
+        get_device(username)
+    except Exception as exc:
+        raise ShadowAccessError("No PC is connected to your Shadow account") from exc
     return username
 
 
@@ -234,7 +238,9 @@ def revoke_access(owner: str, username: str) -> dict[str, Any]:
 
 
 def create_telegram_pair_code(username: str) -> dict[str, Any]:
-    username = require_permission(username, "view")
+    username = _username(username)
+    if not username:
+        raise ShadowAccessError("A real Shadow account is required")
     code = "-".join([
         secrets.token_hex(2).upper(),
         secrets.token_hex(2).upper(),
@@ -260,14 +266,21 @@ def consume_telegram_pair_code(code: str, telegram_user_id: int, chat_id: int) -
         row = state["pair_codes"].pop(code, None)
         if not row:
             raise ShadowAccessError("Pairing code is invalid or expired")
-        username = require_permission(row.get("username"), "view")
+        username = _username(row.get("username"))
+        if not username:
+            raise ShadowAccessError("Pairing code has no account owner")
+        state["telegram"] = {
+            existing_key: existing
+            for existing_key, existing in state["telegram"].items()
+            if _username((existing or {}).get("username")) != username and existing_key != key
+        }
         state["telegram"][key] = {
             "username": username,
             "chat_id": int(chat_id),
             "paired_at": time.time(),
         }
         _save(state)
-    return {"username": username, "permissions": permissions_for(username)}
+    return {"username": username}
 
 
 def telegram_identity(telegram_user_id: int) -> dict[str, Any] | None:
@@ -277,7 +290,17 @@ def telegram_identity(telegram_user_id: int) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
     username = _username(row.get("username"))
-    return {"username": username, "permissions": permissions_for(username), **row}
+    return {"username": username, **row}
+
+
+def telegram_identity_for_chat(chat_id: int) -> dict[str, Any] | None:
+    with _LOCK:
+        state = _load()
+    for row in state["telegram"].values():
+        if isinstance(row, dict) and int(row.get("chat_id") or 0) == int(chat_id):
+            username = _username(row.get("username"))
+            return {"username": username, **row}
+    return None
 
 
 def unlink_telegram(username: str, telegram_user_id: int | None = None) -> dict[str, Any]:

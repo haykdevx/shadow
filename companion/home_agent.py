@@ -19,6 +19,11 @@ from socketserver import ThreadingMixIn, UnixStreamServer
 from pathlib import Path
 from typing import Any
 
+try:
+    import psutil
+except ImportError:  # Optional; Linux keeps its /proc fallback.
+    psutil = None
+
 READ_ACTIONS = frozenset({
     "status",
     "processes",
@@ -88,6 +93,12 @@ def _run_first(candidates: list[list[str]], *, input_text: str | None = None, ti
 
 def _clipboard_set(text: str) -> dict[str, Any]:
     """Clipboard providers may intentionally stay alive after receiving data."""
+    if platform.system() == "Darwin":
+        _run(["pbcopy"], input_text=text)
+        return {"ok": True, "provider": "pbcopy", "resident": False}
+    if platform.system() == "Windows":
+        _run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"], input_text=text)
+        return {"ok": True, "provider": "powershell", "resident": False}
     candidates = [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
     errors = []
     for argv in candidates:
@@ -121,6 +132,9 @@ _CPU_LAST: tuple[int, int] | None = None
 
 
 def _mem_info() -> dict[str, int]:
+    if psutil is not None:
+        values = psutil.virtual_memory()
+        return {"total": int(values.total), "used": int(values.used), "available": int(values.available)}
     values: dict[str, int] = {}
     try:
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
@@ -135,6 +149,8 @@ def _mem_info() -> dict[str, int]:
 
 def _cpu_percent() -> float | None:
     global _CPU_LAST
+    if psutil is not None:
+        return round(float(psutil.cpu_percent(interval=0.1)), 1)
     try:
         parts = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0].split()[1:]
         values = [int(part) for part in parts]
@@ -154,6 +170,14 @@ def _cpu_percent() -> float | None:
 
 
 def _network_info() -> dict[str, Any]:
+    if psutil is not None:
+        per_nic = psutil.net_io_counters(pernic=True)
+        interfaces = [
+            {"name": name, "rx_bytes": int(row.bytes_recv), "tx_bytes": int(row.bytes_sent)}
+            for name, row in per_nic.items() if name.lower() not in {"lo", "loopback"}
+        ]
+        totals = psutil.net_io_counters()
+        return {"interfaces": interfaces, "rx_bytes": int(totals.bytes_recv), "tx_bytes": int(totals.bytes_sent)}
     interfaces = []
     rx_total = 0
     tx_total = 0
@@ -214,11 +238,14 @@ def _gpu_info() -> list[dict[str, Any]]:
 
 
 def _status() -> dict[str, Any]:
-    disk = shutil.disk_usage("/")
-    try:
-        uptime = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
-    except (OSError, ValueError):
-        uptime = 0
+    disk = shutil.disk_usage(Path.home().anchor or "/")
+    if psutil is not None:
+        uptime = max(0, time.time() - float(psutil.boot_time()))
+    else:
+        try:
+            uptime = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+        except (OSError, ValueError):
+            uptime = 0
     try:
         load = list(os.getloadavg())
     except OSError:
@@ -240,11 +267,25 @@ def _status() -> dict[str, Any]:
 
 def _processes(args: dict[str, Any]) -> dict[str, Any]:
     limit = max(1, min(int(args.get("limit", 15)), 50))
+    if psutil is not None:
+        rows = []
+        for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+            try:
+                info = proc.info
+                rows.append((float(info.get("cpu_percent") or 0), f"{int(info.get('pid') or 0):>7} {str(info.get('name') or '')[:28]:<28} {float(info.get('cpu_percent') or 0):>6.1f} {float(info.get('memory_percent') or 0):>6.1f}"))
+            except Exception:
+                continue
+        rows.sort(key=lambda item: item[0], reverse=True)
+        return {"ok": True, "processes": ["PID COMMAND %CPU %MEM", *[row[1] for row in rows[:limit]]]}
+    if platform.system() == "Windows":
+        raise HomeAgentError("Install psutil for process monitoring on Windows")
     output = _run(["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"], timeout=5)
     return {"ok": True, "processes": output.splitlines()[: limit + 1]}
 
 
 def _windows() -> dict[str, Any]:
+    if platform.system() != "Linux":
+        raise HomeAgentError("Window listing currently requires Linux with wmctrl")
     output = _run(["wmctrl", "-lpx"], timeout=5)
     windows = []
     for line in output.splitlines():
@@ -267,12 +308,25 @@ def _screenshot() -> dict[str, Any]:
     fd, name = tempfile.mkstemp(prefix="shadow-screen-", suffix=".png")
     os.close(fd)
     path = Path(name)
-    candidates = [
-        ["grim", str(path)],
-        ["gnome-screenshot", "-f", str(path)],
-        ["spectacle", "-b", "-n", "-o", str(path)],
-        ["import", "-window", "root", str(path)],
-    ]
+    if platform.system() == "Darwin":
+        candidates = [["screencapture", "-x", str(path)]]
+    elif platform.system() == "Windows":
+        escaped = str(path).replace("'", "''")
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms;Add-Type -AssemblyName System.Drawing;"
+            "$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;"
+            "$i=New-Object Drawing.Bitmap $b.Width,$b.Height;"
+            "$g=[Drawing.Graphics]::FromImage($i);$g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size);"
+            f"$i.Save('{escaped}',[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$i.Dispose()"
+        )
+        candidates = [["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script]]
+    else:
+        candidates = [
+            ["grim", str(path)],
+            ["gnome-screenshot", "-f", str(path)],
+            ["spectacle", "-b", "-n", "-o", str(path)],
+            ["import", "-window", "root", str(path)],
+        ]
     errors = []
     try:
         for argv in candidates:
@@ -436,8 +490,9 @@ def _shell(args: dict[str, Any]) -> dict[str, Any]:
         raise HomeAgentError("Shell cwd is not a directory")
     timeout = max(1, min(int(args.get("timeout", 20)), 60))
     try:
+        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command] if platform.system() == "Windows" else ["/bin/bash", "-lc", command]
         proc = subprocess.run(
-            ["/bin/bash", "-lc", command],
+            argv,
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -459,6 +514,10 @@ def _kill_process(args: dict[str, Any]) -> dict[str, Any]:
     if pid <= 1 or pid == os.getpid():
         raise HomeAgentError("Refusing to kill a protected process")
     sig_name = str(args.get("signal") or "TERM").upper()
+    if psutil is not None:
+        proc = psutil.Process(pid)
+        proc.kill() if sig_name == "KILL" else proc.terminate()
+        return {"ok": True, "pid": pid, "signal": sig_name}
     sig = signal.SIGKILL if sig_name == "KILL" else signal.SIGTERM
     os.kill(pid, sig)
     return {"ok": True, "pid": pid, "signal": sig.name}
@@ -515,7 +574,12 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
     if action == "screenshot":
         return _screenshot()
     if action == "clipboard_get":
-        text = _run_first([["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "--clipboard", "--output"]])
+        if platform.system() == "Darwin":
+            text = _run(["pbpaste"])
+        elif platform.system() == "Windows":
+            text = _run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"])
+        else:
+            text = _run_first([["wl-paste", "-n"], ["xclip", "-selection", "clipboard", "-o"], ["xsel", "--clipboard", "--output"]])
         return {"ok": True, "text": text[:100_000]}
     if action == "clipboard_set":
         return _clipboard_set(str(args.get("text") or "")[:100_000])
@@ -526,13 +590,28 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
     if action == "file_write":
         return _file_write(args)
     if action == "lock":
-        _run_first([["loginctl", "lock-session"], ["gnome-screensaver-command", "-l"], ["xdg-screensaver", "lock"]])
+        if platform.system() == "Windows":
+            _run(["rundll32.exe", "user32.dll,LockWorkStation"])
+        elif platform.system() == "Darwin":
+            _run_first([["/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession", "-suspend"], ["pmset", "displaysleepnow"]])
+        else:
+            _run_first([["loginctl", "lock-session"], ["gnome-screensaver-command", "-l"], ["xdg-screensaver", "lock"]])
         return {"ok": True}
     if action == "sleep":
-        _run_first([["systemctl", "suspend"], ["loginctl", "suspend"]])
+        if platform.system() == "Windows":
+            _run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+        elif platform.system() == "Darwin":
+            _run(["pmset", "sleepnow"])
+        else:
+            _run_first([["systemctl", "suspend"], ["loginctl", "suspend"]])
         return {"ok": True}
     if action == "shutdown":
-        _run_first([["systemctl", "poweroff"], ["loginctl", "poweroff"]])
+        if platform.system() == "Windows":
+            _run(["shutdown.exe", "/s", "/t", "0"])
+        elif platform.system() == "Darwin":
+            _run(["osascript", "-e", 'tell application "System Events" to shut down'])
+        else:
+            _run_first([["systemctl", "poweroff"], ["loginctl", "poweroff"]])
         return {"ok": True}
     if action == "type_text":
         _run(["xdotool", "type", "--clearmodifiers", "--", _need_text(args, "text")])

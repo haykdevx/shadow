@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src import shadow_devices
+
 
 READ_ACTIONS = frozenset({
     "status",
@@ -119,7 +121,7 @@ _DANGEROUS_SHELL = re.compile(
     r"(?:^|[\s;&|()])(?:sudo|su|rm|rmdir|mv|chmod|chown|dd|mkfs|mount|umount|kill|killall|pkill|shutdown|reboot|poweroff|systemctl|service|:>)\b|(?:^|[\s;&|()])rm\s+-[^\n]*[rf]",
     re.IGNORECASE,
 )
-_OVERVIEW_CACHE: dict[str, Any] = {"ts": 0.0, "pc": None}
+_OVERVIEW_CACHE: dict[str, dict[str, Any]] = {}
 _OVERVIEW_LOCK = threading.RLock()
 
 _PENDING: dict[str, dict[str, Any]] = {}
@@ -275,10 +277,17 @@ def validate_agent_url(url: str) -> str:
     )
 
 
-def configured() -> bool:
+def configured(principal: str | None = None) -> bool:
     if _demo_enabled():
         return True
-    return bool((_agent_socket() or _agent_url()) and len(_agent_token()) >= 32)
+    owner = str(principal or os.getenv("SHADOW_PC_OWNER") or "").strip().lower()
+    if not owner:
+        return False
+    try:
+        shadow_devices.get_device(owner)
+        return True
+    except shadow_devices.ShadowDeviceError:
+        return False
 
 
 def _validated_agent_url() -> str:
@@ -512,7 +521,7 @@ def delete_runbook(name: str) -> dict[str, Any]:
     return {"ok": True, "name": key}
 
 
-def _execute_runbook(name: str, *, requested_by: str, principal: str | None = None) -> dict[str, Any]:
+def _execute_runbook(name: str, *, requested_by: str, principal: str | None = None, device_id: str | None = None) -> dict[str, Any]:
     key = _runbook_key(name)
     spec = _all_runbooks().get(key)
     if not spec:
@@ -525,7 +534,7 @@ def _execute_runbook(name: str, *, requested_by: str, principal: str | None = No
             if _demo_enabled():
                 result = _demo_read_action(action, args) if action in READ_ACTIONS else _demo_confirmed_action(action, args)
             else:
-                result = _call_home_agent(action, args, confirmed=True)
+                result = _dispatch_device(principal, device_id, action, args, confirmed=True)
             results.append({"action": action, "risk": _risk_for(action, args), "ok": True, "result": result})
         except ShadowPcError as exc:
             results.append({"action": action, "risk": _risk_for(action, args), "ok": False, "error": str(exc)})
@@ -569,6 +578,39 @@ def _call_home_agent(action: str, args: dict[str, Any], *, confirmed: bool = Fal
     return payload
 
 
+def _resolve_device(principal: str | None, device_id: str | None = None) -> dict[str, Any]:
+    owner = str(principal or os.getenv("SHADOW_PC_OWNER") or "").strip().lower()
+    if not owner:
+        raise ShadowPcError("A real Shadow account is required for PC control")
+    try:
+        return shadow_devices.get_device(owner, device_id)
+    except shadow_devices.ShadowDeviceError as exc:
+        raise ShadowPcError(str(exc)) from exc
+
+
+def _dispatch_device(
+    principal: str | None,
+    device_id: str | None,
+    action: str,
+    args: dict[str, Any],
+    *,
+    confirmed: bool,
+) -> dict[str, Any]:
+    device = _resolve_device(principal, device_id)
+    if device.get("transport") == "legacy":
+        return _call_home_agent(action, args, confirmed=confirmed)
+    try:
+        return shadow_devices.dispatch_action(
+            str(device.get("owner") or principal or ""),
+            str(device.get("id") or ""),
+            action,
+            args,
+            confirmed=confirmed,
+        )
+    except shadow_devices.ShadowDeviceError as exc:
+        raise ShadowPcError(str(exc)) from exc
+
+
 def _purge_expired() -> None:
     now = time.time()
     expired = [key for key, item in _PENDING.items() if item["expires_at"] <= now]
@@ -582,15 +624,18 @@ def request_action(
     *,
     requested_by: str = "web",
     principal: str | None = None,
+    device_id: str | None = None,
 ) -> dict[str, Any]:
     action = str(action or "").strip().lower()
     if action not in ALL_ACTIONS:
         raise ShadowPcError(f"Unsupported home PC action: {action or '(missing)'}")
     clean_args = _clean_args(args)
-    _validated_agent_url()
+    if not _demo_enabled():
+        device = _resolve_device(principal, device_id)
+        device_id = str(device.get("id") or "")
     if action in READ_ACTIONS:
         try:
-            result = _demo_read_action(action, clean_args) if _demo_enabled() else _call_home_agent(action, clean_args, confirmed=False)
+            result = _demo_read_action(action, clean_args) if _demo_enabled() else _dispatch_device(principal, device_id, action, clean_args, confirmed=False)
             _audit(action, "executed", requested_by=requested_by, principal=principal, args=clean_args)
             return result
         except ShadowPcError as exc:
@@ -604,6 +649,7 @@ def request_action(
         "risk": _risk_for(action, clean_args),
         "requested_by": str(requested_by or "unknown")[:100],
         "principal": str(principal or "")[:100],
+        "device_id": str(device_id or "")[:80],
         "created_at": now,
         "expires_at": now + _ttl_seconds(),
     }
@@ -641,9 +687,12 @@ def confirm_action(pending_id: str, principal: str | None = None) -> dict[str, A
                 str(item.get("args", {}).get("name") or ""),
                 requested_by=item.get("requested_by", "web"),
                 principal=item.get("principal"),
+                device_id=item.get("device_id"),
             )
         else:
-            result = _demo_confirmed_action(item["action"], item["args"]) if _demo_enabled() else _call_home_agent(item["action"], item["args"], confirmed=True)
+            result = _demo_confirmed_action(item["action"], item["args"]) if _demo_enabled() else _dispatch_device(
+                item.get("principal"), item.get("device_id"), item["action"], item["args"], confirmed=True
+            )
             _audit(
                 item["action"],
                 "executed",
@@ -692,35 +741,45 @@ def _status_cache_ttl() -> float:
         return 3.0
 
 
-def _status_snapshot() -> tuple[dict[str, Any], float]:
+def _status_snapshot(principal: str | None, device_id: str | None = None) -> tuple[dict[str, Any], float]:
     ttl = _status_cache_ttl()
     now = time.time()
+    if _demo_enabled():
+        cache_key = "demo"
+    else:
+        device = _resolve_device(principal, device_id)
+        device_id = str(device.get("id") or "")
+        cache_key = f"{principal or ''}:{device_id}"
     with _OVERVIEW_LOCK:
-        cached = _OVERVIEW_CACHE.get("pc")
-        cached_ts = float(_OVERVIEW_CACHE.get("ts") or 0.0)
+        cached_row = _OVERVIEW_CACHE.get(cache_key) or {}
+        cached = cached_row.get("pc")
+        cached_ts = float(cached_row.get("ts") or 0.0)
         if cached is not None and ttl > 0 and now - cached_ts <= ttl:
             return dict(cached), now - cached_ts
-    pc = _demo_status() if _demo_enabled() else _call_home_agent("status", {}, confirmed=False)
+    pc = _demo_status() if _demo_enabled() else _dispatch_device(principal, device_id, "status", {}, confirmed=False)
     with _OVERVIEW_LOCK:
-        _OVERVIEW_CACHE["pc"] = dict(pc)
-        _OVERVIEW_CACHE["ts"] = now
+        _OVERVIEW_CACHE[cache_key] = {"pc": dict(pc), "ts": now}
     return pc, 0.0
 
 
-def overview(principal: str | None = None) -> dict[str, Any]:
+def overview(principal: str | None = None, device_id: str | None = None) -> dict[str, Any]:
+    devices = [] if _demo_enabled() else shadow_devices.list_devices(str(principal or ""))
+    selected = next((row for row in devices if row.get("selected")), None)
     result: dict[str, Any] = {
-        "configured": configured(),
+        "configured": _demo_enabled() or bool(devices),
         "online": False,
         "demo": _demo_enabled(),
+        "devices": devices,
+        "selected_device": selected,
         "pending": list_pending(principal=principal),
         "actions": {"read": sorted(READ_ACTIONS), "confirm": sorted(WRITE_ACTIONS)},
         "runbooks": list_runbooks(),
         "risk_levels": _ACTION_RISK,
     }
-    if not configured():
+    if not result["configured"]:
         return result
     try:
-        pc, age = _status_snapshot()
+        pc, age = _status_snapshot(principal, device_id)
         result["pc"] = pc
         result["online"] = True
         result["cache"] = {"status_age_seconds": round(age, 2)}
@@ -740,16 +799,13 @@ def tool_action(content: str, *, requested_by: str) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip().lower()
     principal = requested_by.partition(":")[2].strip().lower() if ":" in requested_by else ""
     try:
-        from src.shadow_access import ShadowAccessError, require_permission
-
-        require_permission(principal, "view" if action in READ_ACTIONS else "control")
         result = request_action(
             action,
             payload.get("args"),
             requested_by=requested_by,
             principal=principal,
         )
-    except (ShadowPcError, ShadowAccessError) as exc:
+    except ShadowPcError as exc:
         return {"error": str(exc), "exit_code": 1}
     if result.get("status") == "pending_confirmation":
         pending = result["pending"]
