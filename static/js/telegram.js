@@ -49,6 +49,32 @@ let draftJustSent = false;           // suppress draft save after send
 let profilePanelOpen = false;        // profile slide-over open
 let headerMenuOpen = false;          // header ⋮ menu visible
 
+// ── Wave-3 state ──────────────────────────────────────────────────────────────
+let meId = null;                     // own user id (cached from /me)
+let me = null;                       // cached /me payload
+let activeFolderId = 0;              // 0 = All; otherwise a folder id
+let folders = [];                    // [{id, title, emoticon}]
+let stickerData = null;              // cached /stickers payload
+let gifData = null;                  // cached /gifs payload
+let pickerTab = 'emoji';             // active picker tab
+let selectMode = false;              // multi-select mode active
+const selectedMsgIds = new Set();    // selected message ids in select mode
+let manageTab = 'members';           // active manage-panel tab
+let manageMembers = [];              // cached members for active manage peer
+let composeQuote = null;             // {text} captured quote for next reply
+
+// Common emoji set for the emoji picker (8 categories)
+const EMOJI_CATEGORIES = {
+  'Smileys': ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥳','😏','😒','😞','😔','😟','😕','🙁','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥'],
+  'Gestures': ['👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤝','🙏','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤦','🤷','💪','🦾'],
+  'Hearts': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️'],
+  'Animals': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐢','🐍','🐙','🦑','🦀','🐡','🐠','🐟','🐬','🐳','🐋'],
+  'Food': ['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🌽','🥕','🍕','🍔','🍟','🌭','🍿','🧂','🥓','🥚','🍳','🧇','🥞','🍞','🥐','🥨','🧀','🍩','🍪','🎂','🍰','🍫','🍬','🍭','🍦','☕','🍺','🍷','🍸'],
+  'Activities': ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🏓','🏸','🥅','⛳','🏹','🎣','🥊','🥋','🎽','⛸️','🥌','🛷','🎿','🏂','🏆','🎯','🎮','🎲','🎰','🧩','🎨','🎭','🎬','🎤','🎧','🎸','🎹','🥁'],
+  'Travel': ['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🚚','🚛','🚜','🛵','🏍️','🚲','✈️','🚀','🛸','🚁','⛵','🚤','🛳️','⚓','🚦','🗽','🗼','🏰','🏯','🎡','🎢','🎠','⛲','🏖️','🏝️','🌋','🗻','🏕️'],
+  'Symbols': ['✅','❌','⭕','❗','❓','‼️','⁉️','💯','🔥','⭐','🌟','✨','⚡','💥','💫','💦','💨','🎉','🎊','🎈','🎁','🏳️','🏴','🚩','🔔','🔕','⏰','⌛','💡','🔑','🔒','🔓','💰','💎','🔋','🔌','📌','📍'],
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** HTML-escape a value to safely insert into the DOM as text */
@@ -293,13 +319,17 @@ function build() {
       <!-- Left: dialog list -->
       <div class="tg-dialogs-pane" data-tg-dialogs-pane>
         <div class="tg-search-wrap">
+          <button class="tg-settings-btn" data-tg="settings" title="Settings">☰</button>
           <input class="tg-search-input" type="search" placeholder="Search" data-tg-search />
+          <button class="tg-saved-btn" data-tg="saved-messages" title="Saved Messages">🔖</button>
           <button class="tg-new-btn" data-tg="new-menu" title="New chat">✏</button>
           <div class="tg-new-menu" data-tg-new-menu hidden>
             <div class="tg-new-menu-item" data-tg="new-group">New Group</div>
             <div class="tg-new-menu-item" data-tg="new-channel">New Channel</div>
+            <div class="tg-new-menu-item" data-tg="join-public">Join / Find by link</div>
           </div>
         </div>
+        <div class="tg-folder-tabs" id="tg-folder-tabs" data-tg-folder-tabs></div>
         <div class="tg-archive-bar" data-tg-archive-bar hidden>
           <span class="tg-archive-bar-icon">🗂</span>
           <span class="tg-archive-bar-label">Archived</span>
@@ -405,14 +435,40 @@ function build() {
                 <button class="tg-attach-item" data-attach="media">Photo / Video</button>
                 <button class="tg-attach-item" data-attach="file">File</button>
                 <button class="tg-attach-item" data-attach="voice">Voice</button>
+                <button class="tg-attach-item" data-tg="new-poll">Poll</button>
               </div>
               <!-- Hidden file inputs -->
               <input type="file" multiple accept="image/*,video/*" data-file-input="media" hidden />
               <input type="file" multiple data-file-input="file" hidden />
 
               <textarea class="tg-compose-textarea" placeholder="Write a message…" rows="1" data-tg-textarea></textarea>
+              <button class="tg-compose-icon-btn" data-tg="emoji-toggle" title="Emoji">😊</button>
+              <button class="tg-compose-icon-btn" data-tg="sticker-toggle" title="Stickers">🌟</button>
+              <button class="tg-compose-icon-btn" data-tg="gif-toggle" title="GIFs">GIF</button>
               <button class="tg-rec-btn" data-tg="rec-start" title="Record voice">🎤</button>
               <button class="tg-send-btn" data-tg="send" disabled title="Send (Enter)">➤</button>
+              <button class="tg-schedule-btn" data-tg="schedule-open" title="Schedule message">🕓</button>
+            </div>
+
+            <!-- Emoji / sticker / GIF picker flyout -->
+            <div class="tg-picker" id="tg-picker" data-tg-picker hidden>
+              <div class="tg-picker-tabs">
+                <button class="tg-picker-tab active" data-tg="picker-tab" data-tab="emoji">Emoji</button>
+                <button class="tg-picker-tab" data-tg="picker-tab" data-tab="stickers">Stickers</button>
+                <button class="tg-picker-tab" data-tg="picker-tab" data-tab="gifs">GIFs</button>
+              </div>
+              <div class="tg-picker-body" data-tg-picker-body></div>
+            </div>
+          </div>
+
+          <!-- Bulk-select bottom bar -->
+          <div class="tg-bulk-bar" id="tg-bulk-bar" data-tg-bulk-bar hidden>
+            <span class="tg-bulk-count" data-tg-bulk-count>0 selected</span>
+            <div class="tg-bulk-actions">
+              <button class="tg-bulk-act" data-tg="bulk-copy">Copy</button>
+              <button class="tg-bulk-act" data-tg="bulk-forward">Forward</button>
+              <button class="tg-bulk-act danger" data-tg="bulk-delete">Delete</button>
+              <button class="tg-bulk-act" data-tg="select-cancel">Cancel</button>
             </div>
           </div>
         </div>
@@ -428,6 +484,7 @@ function build() {
         <div class="tg-profile-name" data-tg-profile-name></div>
         <div class="tg-profile-presence" data-tg-profile-presence></div>
       </div>
+      <div class="tg-profile-actions" data-tg-profile-actions></div>
       <div class="tg-profile-sections" data-tg-profile-sections></div>
       <div class="tg-profile-tabs" data-tg-profile-tabs>
         <button class="tg-profile-tab active" data-kind="photo">Photos</button>
@@ -460,6 +517,38 @@ function build() {
         <div class="tg-modal-body" data-tg-modal-body></div>
         <div class="tg-modal-foot" data-tg-modal-foot></div>
       </div>
+    </div>
+
+    <!-- Settings panel -->
+    <div class="tg-settings" id="tg-settings" data-tg-settings hidden>
+      <div class="tg-settings-head">
+        <button class="tg-settings-back" data-tg="settings-back" hidden>‹</button>
+        <button class="tg-settings-close" data-tg="settings-close">✕</button>
+        <span class="tg-settings-title" data-tg-settings-title>Settings</span>
+      </div>
+      <div class="tg-settings-nav" data-tg-settings-nav>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="profile">Edit Profile</div>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="privacy">Privacy</div>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="sessions">Active Sessions</div>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="blocked">Blocked Users</div>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="twofa">Two-Step Verification</div>
+        <div class="tg-settings-row" data-tg="settings-nav" data-view="folders">Chat Folders</div>
+      </div>
+      <div class="tg-settings-sub" data-tg-settings-sub hidden></div>
+    </div>
+
+    <!-- Manage chat panel -->
+    <div class="tg-manage" id="tg-manage" data-tg-manage hidden>
+      <div class="tg-manage-head">
+        <button class="tg-manage-close" data-tg="manage-close">✕</button>
+        <span class="tg-manage-title">Manage</span>
+      </div>
+      <div class="tg-manage-tabs">
+        <button class="tg-manage-tab active" data-tg="manage-tab" data-tab="members">Members</button>
+        <button class="tg-manage-tab" data-tg="manage-tab" data-tab="permissions">Permissions</button>
+        <button class="tg-manage-tab" data-tg="manage-tab" data-tab="invites">Invite Links</button>
+      </div>
+      <div class="tg-manage-body" data-tg-manage-body></div>
     </div>
 
     <!-- Context menu (appended to body dynamically) -->
@@ -654,6 +743,12 @@ function wireEvents(node) {
       if (profilePanelOpen) closeProfilePanel();
       if (headerMenuOpen) closeHeaderMenu();
       if (chatSearchActive) closeChatSearch();
+      closePicker();
+      if (selectMode) exitSelectMode();
+      const settingsPanel = q('[data-tg-settings]');
+      if (settingsPanel && !settingsPanel.hidden) closeSettings();
+      const managePanel = q('[data-tg-manage]');
+      if (managePanel && !managePanel.hidden) closeManage();
     }
     if (e.key === 'ArrowLeft') navigateLightbox(-1);
     if (e.key === 'ArrowRight') navigateLightbox(1);
@@ -675,6 +770,14 @@ function wireEvents(node) {
     if (root && !e.target.closest('[data-tg-new-menu]') && !e.target.closest('[data-tg="new-menu"]')) {
       const nm = root.querySelector('[data-tg-new-menu]');
       if (nm) nm.hidden = true;
+    }
+    // Close emoji/sticker/gif picker when clicking outside it / its toggles
+    if (root && !e.target.closest('[data-tg-picker]') &&
+        !e.target.closest('[data-tg="emoji-toggle"]') &&
+        !e.target.closest('[data-tg="sticker-toggle"]') &&
+        !e.target.closest('[data-tg="gif-toggle"]')) {
+      const pk = root.querySelector('[data-tg-picker]');
+      if (pk) pk.hidden = true;
     }
   });
 
@@ -716,8 +819,11 @@ function wireEvents(node) {
     const targetRow = wrap?.querySelector(`[data-msg-id="${CSS.escape(String(targetId))}"]`);
     if (targetRow) {
       targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      targetRow.classList.add('tg-flash');
-      setTimeout(() => targetRow.classList.remove('tg-flash'), 1200);
+      targetRow.classList.add('highlight', 'tg-flash');
+      setTimeout(() => targetRow.classList.remove('highlight', 'tg-flash'), 1500);
+    } else {
+      // Target not loaded — load a window around it (jump-to-message).
+      jumpToMessage(targetId);
     }
   });
 }
@@ -793,6 +899,63 @@ function handleClick(e) {
     case 'new-menu':          return toggleNewMenu();
     case 'new-group':         return openCreateChatModal('group');
     case 'new-channel':       return openCreateChatModal('channel');
+
+    // ── Group 1: rich content & compose ──
+    case 'emoji-toggle':      return togglePicker('emoji');
+    case 'sticker-toggle':    return togglePicker('stickers');
+    case 'gif-toggle':        return togglePicker('gifs');
+    case 'picker-tab':        return selectPickerTab(btn.dataset.tab);
+    case 'new-poll':          return openPollCreator();
+    case 'poll-vote':         return doPollVote(btn);
+
+    // ── Group 2: settings & account ──
+    case 'settings':          return openSettings();
+    case 'settings-close':    return closeSettings();
+    case 'settings-back':     return settingsBack();
+    case 'settings-nav':      return openSettingsSub(btn.dataset.view);
+    case 'profile-photo':     return q('[data-settings-photo-input]')?.click();
+    case 'save-profile':      return saveProfile();
+    case 'remove-photo':      return removeProfilePhoto();
+    case 'kill-session':      return killSession(btn.dataset.hash);
+    case 'kill-other-sessions': return killOtherSessions();
+    case 'unblock':           return doUnblock(btn.dataset.peer);
+    case 'save-2fa':          return save2fa();
+    case 'folder-tab':        return selectFolder(btn.dataset.folderId);
+    case 'new-folder':        return openFolderEditor();
+    case 'delete-folder':     return deleteFolder(btn.dataset.folderId);
+    case 'saved-messages':    return openSavedMessages();
+
+    // ── Group 3: group & channel admin ──
+    case 'manage-chat':       return openManage(activePeer?.id);
+    case 'manage-close':      return closeManage();
+    case 'manage-tab':        return selectManageTab(btn.dataset.tab);
+    case 'member-menu':       return openMemberMenu(btn);
+    case 'member-promote':    return memberPromote(btn.dataset.user);
+    case 'member-restrict':   return memberRestrict(btn.dataset.user);
+    case 'member-remove':     return memberRemove(btn.dataset.user);
+    case 'add-members':       return openAddMembers();
+    case 'create-invite':     return createInvite();
+    case 'revoke-invite':     return revokeInvite(btn.dataset.link);
+    case 'copy-invite':       return copyInvite(btn.dataset.link);
+    case 'join-public':       return openJoinModal();
+    case 'do-join':           return doJoin(btn.dataset.target);
+    case 'leave-chat':        return leaveChat(activePeer?.id);
+
+    // ── Group 4: power messaging ──
+    case 'select-mode':       return enterSelectMode();
+    case 'select-cancel':     return exitSelectMode();
+    case 'toggle-select':     return toggleSelect(btn.dataset.id);
+    case 'bulk-forward':      return bulkForward();
+    case 'bulk-delete':       return bulkDelete();
+    case 'bulk-copy':         return bulkCopy();
+    case 'schedule-open':     return openScheduleModal();
+    case 'open-scheduled':    return openScheduledList();
+    case 'send-scheduled-now': return sendScheduledNow(btn.dataset.id);
+    case 'delete-scheduled':  return deleteScheduled(btn.dataset.id);
+    case 'quote-reply':       return quoteReply();
+    case 'reaction-details':  return openReactionDetails(btn.dataset.id);
+    case 'read-by':           return openReadBy(btn.dataset.id);
+    case 'set-ttl':           return openTtlMenu();
   }
 }
 
@@ -1161,17 +1324,56 @@ function buildMediaEl(msg) {
     }
     wrapper.appendChild(fileWrap);
 
+  } else if (type === 'poll') {
+    wrapper.appendChild(buildPollEl(msg));
+
   } else if (type === 'webpage') {
-    // Minimal webpage preview
-    if (url) {
-      const link = document.createElement('a');
-      link.className = 'tg-file-chip';
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.innerHTML = `<span class="tg-file-icon">🔗</span><span class="tg-file-name">${esc(filename || url)}</span>`;
-      wrapper.appendChild(link);
+    const wp = media.webpage || {};
+    const cardUrl = wp.url || url;
+    const card = document.createElement('a');
+    card.className = 'tg-webpage';
+    card.href = cardUrl || '#';
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    const bar = document.createElement('div');
+    bar.className = 'tg-webpage-bar';
+    const inner = document.createElement('div');
+    inner.className = 'tg-webpage-inner';
+    if (wp.site_name) {
+      const site = document.createElement('div');
+      site.className = 'tg-webpage-site';
+      site.textContent = wp.site_name;
+      inner.appendChild(site);
     }
+    if (wp.title) {
+      const t = document.createElement('div');
+      t.className = 'tg-webpage-title';
+      t.textContent = wp.title;
+      inner.appendChild(t);
+    }
+    if (wp.description) {
+      const d = document.createElement('div');
+      d.className = 'tg-webpage-desc';
+      d.textContent = wp.description;
+      inner.appendChild(d);
+    }
+    if (!wp.title && !wp.description && (wp.display_url || cardUrl)) {
+      const d = document.createElement('div');
+      d.className = 'tg-webpage-desc';
+      d.textContent = wp.display_url || cardUrl;
+      inner.appendChild(d);
+    }
+    bar.appendChild(inner);
+    card.appendChild(bar);
+    if (wp.photo_url) {
+      const photo = document.createElement('img');
+      photo.className = 'tg-webpage-photo';
+      photo.src = wp.photo_url;
+      photo.loading = 'lazy';
+      photo.alt = wp.title || '';
+      card.appendChild(photo);
+    }
+    wrapper.appendChild(card);
 
   } else if (url) {
     // Fallback for unknown types with a URL
@@ -1186,6 +1388,110 @@ function buildMediaEl(msg) {
   }
 
   return wrapper.firstChild ? wrapper : null;
+}
+
+/** Build a poll element from a message with media.type === 'poll' */
+function buildPollEl(msg) {
+  const poll = msg.media?.poll || {};
+  const answers = poll.answers || [];
+  const total = poll.total_voters || 0;
+  const wrap = document.createElement('div');
+  wrap.className = 'tg-poll';
+  wrap.dataset.msgId = msg.id;
+
+  const qEl = document.createElement('div');
+  qEl.className = 'tg-poll-q';
+  qEl.textContent = poll.question || '';
+  wrap.appendChild(qEl);
+
+  const meta = document.createElement('div');
+  meta.className = 'tg-poll-meta';
+  const kindParts = [];
+  if (poll.quiz) kindParts.push('Quiz');
+  else if (poll.multiple) kindParts.push('Multiple answers');
+  else kindParts.push('Anonymous poll');
+  if (poll.public) kindParts.push('Public');
+  meta.textContent = kindParts.join(' · ');
+  wrap.appendChild(meta);
+
+  const hasVoted = answers.some((a) => a.chosen);
+  const showResults = hasVoted || poll.closed;
+
+  answers.forEach((a) => {
+    const opt = document.createElement('button');
+    opt.className = `tg-poll-opt${a.chosen ? ' chosen' : ''}${a.correct === true ? ' correct' : ''}${a.correct === false && a.chosen ? ' wrong' : ''}`;
+    opt.dataset.tg = 'poll-vote';
+    opt.dataset.msgId = msg.id;
+    opt.dataset.option = a.option;
+    if (poll.closed) opt.disabled = true;
+
+    const label = document.createElement('span');
+    label.className = 'tg-poll-opt-text';
+    label.textContent = a.text || '';
+    opt.appendChild(label);
+
+    if (showResults) {
+      const pct = total ? Math.round((a.voters / total) * 100) : 0;
+      const pctEl = document.createElement('span');
+      pctEl.className = 'tg-poll-pct';
+      pctEl.textContent = pct + '%';
+      opt.appendChild(pctEl);
+      const bar = document.createElement('div');
+      bar.className = 'tg-poll-bar';
+      bar.style.width = pct + '%';
+      opt.appendChild(bar);
+    }
+    wrap.appendChild(opt);
+  });
+
+  const footer = document.createElement('div');
+  footer.className = 'tg-poll-meta';
+  footer.textContent = poll.closed
+    ? `Final results · ${total} voter${total === 1 ? '' : 's'}`
+    : `${total} voter${total === 1 ? '' : 's'}`;
+  wrap.appendChild(footer);
+
+  return wrap;
+}
+
+/** Vote on a poll option (delegated via data-tg="poll-vote") */
+async function doPollVote(btn) {
+  if (!activePeer) return;
+  const msgId = btn.dataset.msgId;
+  const option = Number(btn.dataset.option);
+  const msg = messages.find((m) => String(m.id) === String(msgId));
+  const poll = msg?.media?.poll;
+  if (!poll || poll.closed) return;
+
+  // For multiple-choice polls, accumulate selected options; otherwise single.
+  let options = [option];
+  if (poll.multiple) {
+    const chosen = (poll.answers || []).filter((a) => a.chosen).map((a) => a.option);
+    const set = new Set(chosen);
+    if (set.has(option)) set.delete(option); else set.add(option);
+    options = Array.from(set);
+  }
+
+  try {
+    const res = await api('/poll/vote', {
+      method: 'POST',
+      body: JSON.stringify({ peer_id: activePeer.id, message_id: Number(msgId), options }),
+    });
+    if (res.message) updatePollMessage(res.message);
+  } catch (err) {
+    showToast('Vote failed: ' + err.message, true);
+  }
+}
+
+/** Replace a poll message's bubble after voting */
+function updatePollMessage(msg) {
+  const idx = messages.findIndex((m) => String(m.id) === String(msg.id));
+  if (idx !== -1) messages[idx] = msg;
+  const wrap = q('[data-tg-messages]');
+  const row = wrap?.querySelector(`[data-msg-id="${CSS.escape(String(msg.id))}"]`);
+  if (!row) return;
+  const oldPoll = row.querySelector('.tg-poll');
+  if (oldPoll) oldPoll.replaceWith(buildPollEl(msg));
 }
 
 /**
@@ -1240,8 +1546,18 @@ function buildMessageDOM(msgList, showChannel) {
 
     // Bubble row
     const row = document.createElement('div');
-    row.className = `tg-bubble-row ${msg.out ? 'out' : 'in'} ${groupClass}`;
+    row.className = `tg-bubble-row ${msg.out ? 'out' : 'in'} ${groupClass}${selectMode ? ' selecting' : ''}${selectedMsgIds.has(String(msg.id)) ? ' selected' : ''}`;
     row.dataset.msgId = msg.id;
+
+    // Selection checkbox (multi-select mode)
+    if (selectMode) {
+      const check = document.createElement('span');
+      check.className = `tg-msg-check${selectedMsgIds.has(String(msg.id)) ? ' checked' : ''}`;
+      check.dataset.tg = 'toggle-select';
+      check.dataset.id = msg.id;
+      check.textContent = selectedMsgIds.has(String(msg.id)) ? '✓' : '';
+      row.appendChild(check);
+    }
 
     // Hover actions bar
     const actionsBar = document.createElement('div');
@@ -1368,6 +1684,16 @@ function buildMessageDOM(msgList, showChannel) {
     }
     bubble.appendChild(footer);
 
+    // "Seen by" affordance on own messages in groups
+    if (msg.out && showChannel && activePeer?.type === 'group') {
+      const seen = document.createElement('button');
+      seen.className = 'tg-readby';
+      seen.dataset.tg = 'read-by';
+      seen.dataset.id = msg.id;
+      seen.textContent = 'Seen by';
+      bubble.appendChild(seen);
+    }
+
     row.appendChild(bubble);
 
     // Reactions
@@ -1398,9 +1724,14 @@ function buildReactionsEl(msg) {
     const countSpan = document.createElement('span');
     countSpan.className = 'tg-reaction-count';
     countSpan.textContent = r.count;
+    // The count span opens the "who reacted" popover (delegated data-tg).
+    countSpan.dataset.tg = 'reaction-details';
+    countSpan.dataset.id = msg.id;
     btn.appendChild(emojiSpan);
     btn.appendChild(countSpan);
     btn.addEventListener('click', (e) => {
+      // Ignore clicks that originated on the reaction-details count span.
+      if (e.target.closest('[data-tg="reaction-details"]')) return;
       e.stopPropagation();
       toggleReaction(msg.id, r.emoji, r.chosen);
     });
@@ -1618,6 +1949,7 @@ function openContextMenu(x, y, msg, row) {
 
   const items = [
     { act: 'reply',   label: 'Reply' },
+    { act: 'quote-reply', label: 'Quote reply' },
     { act: 'forward', label: 'Forward' },
     { act: 'copy',    label: 'Copy text' },
     ...(isOwn && isText ? [{ act: 'edit', label: 'Edit' }] : []),
@@ -1667,6 +1999,9 @@ async function handleCtxAction(act, msg) {
   switch (act) {
     case 'reply':
       setComposeReply(msg);
+      break;
+    case 'quote-reply':
+      quoteReplyForMsg(msg);
       break;
     case 'forward':
       openForwardPicker([msg.id]);
@@ -1745,6 +2080,7 @@ function showComposeAction(icon, title, text) {
 
 function cancelComposeMode() {
   composeMode = null;
+  composeQuote = null;
   const bar = q('[data-tg-compose-action]');
   if (bar) bar.hidden = true;
   const textarea = q('[data-tg-textarea]');
@@ -1973,6 +2309,7 @@ async function doSend() {
 
   // --- Reply / Normal send ---
   const replyToId = (composeMode && composeMode.mode === 'reply') ? composeMode.msgId : null;
+  const quoteText = (composeMode && composeMode.mode === 'reply') ? (composeQuote?.text || null) : null;
   cancelComposeMode();
 
   // Optimistic append
@@ -1998,6 +2335,7 @@ async function doSend() {
   try {
     const body = { peer_id: activePeer.id, text };
     if (replyToId) body.reply_to_id = replyToId;
+    if (quoteText) body.quote = quoteText;
     const res = await api('/send', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -2446,7 +2784,8 @@ async function doLogout() {
 
 async function loadDialogs() {
   try {
-    const payload = await api('/dialogs?limit=50');
+    const folderQ = activeFolderId ? `&folder_id=${encodeURIComponent(activeFolderId)}` : '';
+    const payload = await api(`/dialogs?limit=50${folderQ}`);
     dialogs = payload.dialogs || [];
     renderDialogs(q('[data-tg-search]')?.value?.trim().toLowerCase() || '');
   } catch (err) {
@@ -2584,6 +2923,16 @@ function resetMainState() {
   viewingArchive = false;
   profilePanelOpen = false;
   headerMenuOpen = false;
+  meId = null;
+  me = null;
+  activeFolderId = 0;
+  folders = [];
+  stickerData = null;
+  gifData = null;
+  selectMode = false;
+  selectedMsgIds.clear();
+  manageMembers = [];
+  composeQuote = null;
   clearTimeout(draftSaveTimer);
   draftSaveTimer = null;
   // Hide logout button
@@ -2617,6 +2966,14 @@ async function onAuthorized() {
   if (noChat)    noChat.hidden = false;
   if (activeChat) activeChat.hidden = true;
   renderDialogSkeletons();
+  // Cache own identity (for Saved Messages + own-message checks)
+  try {
+    me = await api('/me');
+    meId = me?.id ?? null;
+  } catch (_) { me = null; meId = null; }
+  // Load folders and render the folder tab strip
+  activeFolderId = 0;
+  loadFolders();
   await loadDialogs();
   startPolling();
 }
@@ -2700,15 +3057,24 @@ function toggleHeaderMenu() {
     { act: 'hm-pin',          label: dialog.pinned   ? 'Unpin chat'  : 'Pin chat' },
     { act: 'hm-archive',      label: dialog.archived ? 'Unarchive'   : 'Archive' },
     { act: 'hm-mark-unread',  label: 'Mark as unread' },
+    { act: 'tg:select-mode',  label: 'Select messages' },
+    { act: 'tg:open-scheduled', label: 'Scheduled messages' },
+    { act: 'tg:set-ttl',      label: 'Auto-delete timer' },
     { act: 'hm-clear',        label: 'Clear history', danger: true },
     { act: 'hm-delete',       label: dialog.type === 'channel' ? 'Leave channel' : 'Delete chat', danger: true },
   ];
   items.forEach(({ act, label, danger }) => {
     const el = document.createElement('div');
     el.className = `tg-hm-item${danger ? ' danger' : ''}`;
-    el.dataset.act = act;
+    // Items prefixed "tg:" carry a real data-tg action handled by the delegated switch
+    if (act.startsWith('tg:')) {
+      el.dataset.tg = act.slice(3);
+      el.addEventListener('click', () => closeHeaderMenu());
+    } else {
+      el.dataset.act = act;
+      el.addEventListener('click', () => { closeHeaderMenu(); handleHeaderMenuAction(act, dialog); });
+    }
     el.textContent = label;
-    el.addEventListener('click', () => { closeHeaderMenu(); handleHeaderMenuAction(act, dialog); });
     menu.appendChild(el);
   });
   menu.hidden = false;
@@ -3095,6 +3461,28 @@ async function openProfilePanel(peerId) {
     if (nameEl) nameEl.textContent = profile.title || '';
     if (presenceEl) presenceEl.textContent = profile.status_label || (profile.online ? 'online' : '');
 
+    // Profile actions (Manage / Leave) for groups & channels
+    const actionsEl = q('[data-tg-profile-actions]');
+    if (actionsEl) {
+      actionsEl.innerHTML = '';
+      const ptype = profile.type || activePeer?.type;
+      if (ptype === 'group' || ptype === 'channel') {
+        const canManage = profile.can_edit !== false; // default to showing
+        if (canManage) {
+          const mng = document.createElement('button');
+          mng.className = 'tg-profile-action-btn';
+          mng.dataset.tg = 'manage-chat';
+          mng.textContent = 'Manage';
+          actionsEl.appendChild(mng);
+        }
+        const leave = document.createElement('button');
+        leave.className = 'tg-profile-action-btn danger';
+        leave.dataset.tg = 'leave-chat';
+        leave.textContent = ptype === 'channel' ? 'Leave channel' : 'Leave group';
+        actionsEl.appendChild(leave);
+      }
+    }
+
     if (sectionsEl) {
       sectionsEl.innerHTML = '';
       const rows = [
@@ -3403,6 +3791,1579 @@ function scheduleDraftSave() {
   // Draft saving is handled by the textarea input listener in wireEvents.
   // Reset the sent flag so next keystroke schedules a save.
   draftJustSent = false;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// WAVE 3
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Insert text at the caret of the compose textarea */
+function insertAtCaret(text) {
+  const ta = q('[data-tg-textarea]');
+  if (!ta) return;
+  const start = ta.selectionStart ?? ta.value.length;
+  const end = ta.selectionEnd ?? ta.value.length;
+  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+  const pos = start + text.length;
+  ta.selectionStart = ta.selectionEnd = pos;
+  ta.focus();
+  autoGrow(ta);
+  const sendBtn = q('[data-tg="send"]');
+  if (sendBtn) sendBtn.disabled = !ta.value.trim();
+}
+
+// ── Group 1: emoji / sticker / gif picker ────────────────────────────────────
+
+function togglePicker(tab) {
+  const picker = q('[data-tg-picker]');
+  if (!picker) return;
+  if (!picker.hidden && pickerTab === tab) { picker.hidden = true; return; }
+  picker.hidden = false;
+  selectPickerTab(tab);
+}
+
+function closePicker() {
+  const picker = q('[data-tg-picker]');
+  if (picker) picker.hidden = true;
+}
+
+function selectPickerTab(tab) {
+  pickerTab = tab || 'emoji';
+  const picker = q('[data-tg-picker]');
+  if (!picker) return;
+  picker.querySelectorAll('.tg-picker-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === pickerTab);
+  });
+  if (pickerTab === 'emoji') renderEmojiPicker();
+  else if (pickerTab === 'stickers') renderStickerPicker();
+  else if (pickerTab === 'gifs') renderGifPicker();
+}
+
+function renderEmojiPicker() {
+  const body = q('[data-tg-picker-body]');
+  if (!body) return;
+  body.innerHTML = '';
+  Object.entries(EMOJI_CATEGORIES).forEach(([cat, emojis]) => {
+    const title = document.createElement('div');
+    title.className = 'tg-sticker-set-title';
+    title.textContent = cat;
+    body.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'tg-emoji-grid';
+    emojis.forEach((emoji) => {
+      const btn = document.createElement('button');
+      btn.className = 'tg-emoji';
+      btn.textContent = emoji;
+      btn.addEventListener('click', () => insertAtCaret(emoji));
+      grid.appendChild(btn);
+    });
+    body.appendChild(grid);
+  });
+}
+
+async function renderStickerPicker() {
+  const body = q('[data-tg-picker-body]');
+  if (!body) return;
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  try {
+    if (!stickerData) stickerData = await api('/stickers');
+  } catch (err) {
+    body.innerHTML = `<div class="tg-empty-state">Failed to load stickers: ${esc(err.message)}</div>`;
+    return;
+  }
+  body.innerHTML = '';
+  const groups = [];
+  if (stickerData.recent?.length) groups.push({ title: 'Recent', stickers: stickerData.recent });
+  if (stickerData.faved?.length) groups.push({ title: 'Favorites', stickers: stickerData.faved });
+  (stickerData.sets || []).forEach((s) => groups.push({ title: s.title, stickers: s.stickers || [] }));
+
+  if (!groups.length) { body.innerHTML = '<div class="tg-empty-state">No stickers</div>'; return; }
+
+  groups.forEach((g) => {
+    const set = document.createElement('div');
+    set.className = 'tg-sticker-set';
+    const title = document.createElement('div');
+    title.className = 'tg-sticker-set-title';
+    title.textContent = g.title;
+    set.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'tg-sticker-grid';
+    (g.stickers || []).forEach((st) => {
+      const img = document.createElement('img');
+      img.className = 'tg-sticker';
+      img.src = st.url;
+      img.alt = st.emoji || 'sticker';
+      img.loading = 'lazy';
+      img.addEventListener('click', () => sendSticker(st.id));
+      grid.appendChild(img);
+    });
+    set.appendChild(grid);
+    body.appendChild(set);
+  });
+}
+
+async function renderGifPicker() {
+  const body = q('[data-tg-picker-body]');
+  if (!body) return;
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  try {
+    if (!gifData) gifData = await api('/gifs');
+  } catch (err) {
+    body.innerHTML = `<div class="tg-empty-state">Failed to load GIFs: ${esc(err.message)}</div>`;
+    return;
+  }
+  body.innerHTML = '';
+  const gifs = gifData.gifs || [];
+  if (!gifs.length) { body.innerHTML = '<div class="tg-empty-state">No GIFs</div>'; return; }
+  const grid = document.createElement('div');
+  grid.className = 'tg-gif-grid';
+  gifs.forEach((g) => {
+    const img = document.createElement('img');
+    img.className = 'tg-gif';
+    img.src = g.thumb_url || g.url;
+    img.loading = 'lazy';
+    img.addEventListener('click', () => sendGif(g.id));
+    grid.appendChild(img);
+  });
+  body.appendChild(grid);
+}
+
+async function sendSticker(docId) {
+  if (!activePeer) return;
+  closePicker();
+  const replyToId = (composeMode && composeMode.mode === 'reply') ? composeMode.msgId : null;
+  cancelComposeMode();
+  try {
+    const body = { peer_id: activePeer.id, doc_id: docId };
+    if (replyToId) body.reply_to_id = replyToId;
+    const res = await api('/send-sticker', { method: 'POST', body: JSON.stringify(body) });
+    if (res.message) { appendMessage(res.message); scrollToBottom(true); }
+  } catch (err) {
+    showToast('Failed to send sticker: ' + err.message, true);
+  }
+}
+
+async function sendGif(docId) {
+  if (!activePeer) return;
+  closePicker();
+  const replyToId = (composeMode && composeMode.mode === 'reply') ? composeMode.msgId : null;
+  cancelComposeMode();
+  try {
+    const body = { peer_id: activePeer.id, doc_id: docId };
+    if (replyToId) body.reply_to_id = replyToId;
+    const res = await api('/send-gif', { method: 'POST', body: JSON.stringify(body) });
+    if (res.message) { appendMessage(res.message); scrollToBottom(true); }
+  } catch (err) {
+    showToast('Failed to send GIF: ' + err.message, true);
+  }
+}
+
+// ── Group 1: poll creator ────────────────────────────────────────────────────
+
+function openPollCreator() {
+  const menu = q('[data-tg-attach-menu]');
+  if (menu) menu.hidden = true;
+  if (!activePeer) { showToast('Open a chat first', true); return; }
+
+  const body = document.createElement('div');
+  body.className = 'tg-poll-form';
+
+  const qInput = document.createElement('input');
+  qInput.className = 'tg-field-input';
+  qInput.placeholder = 'Ask a question';
+  qInput.type = 'text';
+  body.appendChild(qInput);
+
+  const optsWrap = document.createElement('div');
+  optsWrap.className = 'tg-poll-options';
+  body.appendChild(optsWrap);
+
+  let quizMode = false;
+  let correctIdx = 0;
+
+  function addOptionRow(value = '') {
+    if (optsWrap.children.length >= 10) return;
+    const rowEl = document.createElement('div');
+    rowEl.className = 'tg-poll-option-row';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'tg-poll-correct';
+    radio.className = 'tg-poll-correct';
+    radio.hidden = !quizMode;
+    const inp = document.createElement('input');
+    inp.className = 'tg-field-input';
+    inp.type = 'text';
+    inp.placeholder = 'Option';
+    inp.value = value;
+    const rm = document.createElement('button');
+    rm.className = 'tg-poll-option-rm';
+    rm.textContent = '✕';
+    rm.type = 'button';
+    rm.addEventListener('click', () => {
+      if (optsWrap.children.length <= 2) return;
+      rowEl.remove();
+      reindexRadios();
+    });
+    inp.addEventListener('input', () => {
+      // Auto-add a fresh empty row when the last one is typed into
+      const rows = Array.from(optsWrap.children);
+      if (rows[rows.length - 1] === rowEl && inp.value.trim() && rows.length < 10) {
+        addOptionRow();
+      }
+    });
+    radio.addEventListener('change', () => {
+      correctIdx = Array.from(optsWrap.children).indexOf(rowEl);
+    });
+    rowEl.appendChild(radio);
+    rowEl.appendChild(inp);
+    rowEl.appendChild(rm);
+    optsWrap.appendChild(rowEl);
+    reindexRadios();
+  }
+
+  function reindexRadios() {
+    Array.from(optsWrap.children).forEach((rowEl, i) => {
+      const radio = rowEl.querySelector('.tg-poll-correct');
+      if (radio) radio.hidden = !quizMode;
+    });
+  }
+
+  addOptionRow();
+  addOptionRow();
+
+  // Settings checkboxes
+  const settings = document.createElement('div');
+  settings.className = 'tg-poll-settings';
+
+  const multipleLbl = document.createElement('label');
+  const multipleChk = document.createElement('input');
+  multipleChk.type = 'checkbox';
+  multipleLbl.appendChild(multipleChk);
+  multipleLbl.append(' Multiple answers');
+
+  const quizLbl = document.createElement('label');
+  const quizChk = document.createElement('input');
+  quizChk.type = 'checkbox';
+  quizLbl.appendChild(quizChk);
+  quizLbl.append(' Quiz mode');
+
+  const anonLbl = document.createElement('label');
+  const anonChk = document.createElement('input');
+  anonChk.type = 'checkbox';
+  anonChk.checked = true;
+  anonLbl.appendChild(anonChk);
+  anonLbl.append(' Anonymous');
+
+  quizChk.addEventListener('change', () => {
+    quizMode = quizChk.checked;
+    if (quizMode) { multipleChk.checked = false; multipleChk.disabled = true; }
+    else { multipleChk.disabled = false; }
+    reindexRadios();
+  });
+
+  settings.appendChild(multipleLbl);
+  settings.appendChild(quizLbl);
+  settings.appendChild(anonLbl);
+  body.appendChild(settings);
+
+  openModal('New Poll', body, [
+    {
+      label: 'Create',
+      primary: true,
+      action: async () => {
+        const question = qInput.value.trim();
+        const options = Array.from(optsWrap.querySelectorAll('.tg-field-input'))
+          .map((i) => i.value.trim()).filter(Boolean);
+        if (!question) { showToast('Enter a question', true); return; }
+        if (options.length < 2) { showToast('Add at least two options', true); return; }
+        const payload = {
+          peer_id: activePeer.id,
+          question,
+          options,
+          multiple: multipleChk.checked,
+          quiz: quizChk.checked,
+          public: !anonChk.checked,
+        };
+        if (quizChk.checked) payload.correct = correctIdx;
+        closeModal();
+        try {
+          const res = await api('/poll', { method: 'POST', body: JSON.stringify(payload) });
+          if (res.message) { appendMessage(res.message); scrollToBottom(true); }
+        } catch (err) {
+          showToast('Failed to create poll: ' + err.message, true);
+        }
+      },
+    },
+    { label: 'Cancel', action: closeModal },
+  ]);
+}
+
+// ── Group 2: settings panel ──────────────────────────────────────────────────
+
+function openSettings() {
+  const panel = q('[data-tg-settings]');
+  if (!panel) return;
+  panel.hidden = false;
+  showSettingsNav();
+}
+
+function closeSettings() {
+  const panel = q('[data-tg-settings]');
+  if (panel) panel.hidden = true;
+}
+
+function showSettingsNav() {
+  const nav = q('[data-tg-settings-nav]');
+  const sub = q('[data-tg-settings-sub]');
+  const back = q('[data-tg="settings-back"]');
+  const title = q('[data-tg-settings-title]');
+  if (nav) nav.hidden = false;
+  if (sub) { sub.hidden = true; sub.innerHTML = ''; }
+  if (back) back.hidden = true;
+  if (title) title.textContent = 'Settings';
+}
+
+function settingsBack() {
+  showSettingsNav();
+}
+
+function openSettingsSub(view) {
+  const nav = q('[data-tg-settings-nav]');
+  const sub = q('[data-tg-settings-sub]');
+  const back = q('[data-tg="settings-back"]');
+  const title = q('[data-tg-settings-title]');
+  if (nav) nav.hidden = true;
+  if (sub) { sub.hidden = false; sub.innerHTML = '<div class="tg-empty-state">Loading…</div>'; }
+  if (back) back.hidden = false;
+  const titles = { profile: 'Edit Profile', privacy: 'Privacy', sessions: 'Active Sessions', blocked: 'Blocked Users', twofa: 'Two-Step Verification', folders: 'Chat Folders' };
+  if (title) title.textContent = titles[view] || 'Settings';
+  if (view === 'profile') renderProfileSettings();
+  else if (view === 'privacy') renderPrivacySettings();
+  else if (view === 'sessions') renderSessionsSettings();
+  else if (view === 'blocked') renderBlockedSettings();
+  else if (view === 'twofa') render2faSettings();
+  else if (view === 'folders') renderFoldersSettings();
+}
+
+async function renderProfileSettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  let data;
+  try { data = await api('/me'); me = data; meId = data?.id ?? meId; }
+  catch (err) { sub.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+
+  sub.innerHTML = '';
+  const form = document.createElement('div');
+  form.className = 'tg-form';
+
+  // Avatar edit
+  const avatarEdit = document.createElement('div');
+  avatarEdit.className = 'tg-avatar-edit';
+  const av = buildAvatarEl({ id: data.id, title: data.name, has_photo: data.has_photo });
+  avatarEdit.appendChild(av);
+  const photoBtns = document.createElement('div');
+  const photoBtn = document.createElement('button');
+  photoBtn.className = 'tg-btn';
+  photoBtn.dataset.tg = 'profile-photo';
+  photoBtn.textContent = 'Change Photo';
+  const rmBtn = document.createElement('button');
+  rmBtn.className = 'tg-btn tg-btn-danger';
+  rmBtn.dataset.tg = 'remove-photo';
+  rmBtn.textContent = 'Remove';
+  const photoInput = document.createElement('input');
+  photoInput.type = 'file';
+  photoInput.accept = 'image/*';
+  photoInput.hidden = true;
+  photoInput.dataset.settingsPhotoInput = '1';
+  photoInput.addEventListener('change', () => {
+    if (photoInput.files && photoInput.files[0]) uploadProfilePhoto(photoInput.files[0]);
+    photoInput.value = '';
+  });
+  photoBtns.appendChild(photoBtn);
+  photoBtns.appendChild(rmBtn);
+  photoBtns.appendChild(photoInput);
+  avatarEdit.appendChild(photoBtns);
+  form.appendChild(avatarEdit);
+
+  const fields = [
+    { key: 'first', label: 'First name', value: data.first || '' },
+    { key: 'last', label: 'Last name', value: data.last || '' },
+    { key: 'bio', label: 'Bio', value: data.bio || '' },
+    { key: 'username', label: 'Username', value: data.username || '' },
+  ];
+  fields.forEach((f) => {
+    const field = document.createElement('div');
+    field.className = 'tg-form-field';
+    const lbl = document.createElement('label');
+    lbl.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'tg-field-input';
+    inp.value = f.value;
+    inp.dataset.profileField = f.key;
+    field.appendChild(lbl);
+    field.appendChild(inp);
+    form.appendChild(field);
+  });
+
+  const save = document.createElement('button');
+  save.className = 'tg-btn tg-btn-primary';
+  save.dataset.tg = 'save-profile';
+  save.textContent = 'Save';
+  form.appendChild(save);
+
+  sub.appendChild(form);
+}
+
+async function saveProfile() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  const get = (k) => sub.querySelector(`[data-profile-field="${k}"]`)?.value.trim() ?? '';
+  try {
+    await api('/profile/update', {
+      method: 'POST',
+      body: JSON.stringify({ first: get('first'), last: get('last'), bio: get('bio') }),
+    });
+    await api('/profile/username', {
+      method: 'POST',
+      body: JSON.stringify({ username: get('username') }),
+    });
+    me = await api('/me');
+    meId = me?.id ?? meId;
+    showToast('Profile updated');
+  } catch (err) {
+    showToast('Failed to save: ' + err.message, true);
+  }
+}
+
+async function uploadProfilePhoto(file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  try {
+    await api('/profile/photo', { method: 'POST', body: fd });
+    showToast('Photo updated');
+    renderProfileSettings();
+  } catch (err) {
+    showToast('Upload failed: ' + err.message, true);
+  }
+}
+
+async function removeProfilePhoto() {
+  try {
+    await api('/profile/photo', { method: 'DELETE' });
+    showToast('Photo removed');
+    renderProfileSettings();
+  } catch (err) {
+    showToast('Failed: ' + err.message, true);
+  }
+}
+
+const PRIVACY_KEYS = [
+  { key: 'last_seen', label: 'Last Seen & Online' },
+  { key: 'phone', label: 'Phone Number' },
+  { key: 'profile_photo', label: 'Profile Photo' },
+  { key: 'calls', label: 'Calls' },
+  { key: 'forwards', label: 'Forwarded Messages' },
+  { key: 'groups', label: 'Groups & Channels' },
+];
+const PRIVACY_BUCKETS = ['everybody', 'contacts', 'nobody'];
+
+async function renderPrivacySettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  let data;
+  try { data = await api('/privacy'); }
+  catch (err) { sub.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+  sub.innerHTML = '';
+  PRIVACY_KEYS.forEach(({ key, label }) => {
+    const row = document.createElement('div');
+    row.className = 'tg-form-field tg-privacy-row';
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const seg = document.createElement('div');
+    seg.className = 'tg-seg';
+    PRIVACY_BUCKETS.forEach((bucket) => {
+      const opt = document.createElement('button');
+      opt.className = `tg-seg-opt${data[key] === bucket ? ' active' : ''}`;
+      opt.textContent = bucket.charAt(0).toUpperCase() + bucket.slice(1);
+      opt.addEventListener('click', async () => {
+        seg.querySelectorAll('.tg-seg-opt').forEach((o) => o.classList.remove('active'));
+        opt.classList.add('active');
+        try {
+          await api('/privacy', { method: 'POST', body: JSON.stringify({ key, value: bucket }) });
+          showToast('Privacy updated');
+        } catch (err) { showToast('Failed: ' + err.message, true); }
+      });
+      seg.appendChild(opt);
+    });
+    row.appendChild(seg);
+    sub.appendChild(row);
+  });
+}
+
+async function renderSessionsSettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  let data;
+  try { data = await api('/sessions'); }
+  catch (err) { sub.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+  sub.innerHTML = '';
+  const sessions = data.sessions || [];
+  const others = sessions.filter((s) => !s.current);
+  if (others.length) {
+    const killAll = document.createElement('button');
+    killAll.className = 'tg-btn tg-btn-danger';
+    killAll.dataset.tg = 'kill-other-sessions';
+    killAll.textContent = 'Terminate all other sessions';
+    sub.appendChild(killAll);
+  }
+  sessions.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = `tg-session${s.current ? ' current' : ''}`;
+    const info = document.createElement('div');
+    info.className = 'tg-session-meta';
+    const dev = document.createElement('div');
+    dev.className = 'tg-session-device';
+    dev.textContent = `${s.device || ''} ${s.app || ''}`.trim() || 'Unknown device';
+    const loc = document.createElement('div');
+    loc.className = 'tg-session-loc';
+    loc.textContent = [s.platform, s.ip, s.country].filter(Boolean).join(' · ') + (s.current ? ' · This device' : '');
+    info.appendChild(dev);
+    info.appendChild(loc);
+    row.appendChild(info);
+    if (!s.current) {
+      const kill = document.createElement('button');
+      kill.className = 'tg-btn tg-btn-danger';
+      kill.dataset.tg = 'kill-session';
+      kill.dataset.hash = s.hash;
+      kill.textContent = 'Terminate';
+      row.appendChild(kill);
+    }
+    sub.appendChild(row);
+  });
+  if (!sessions.length) sub.innerHTML = '<div class="tg-empty-state">No sessions</div>';
+}
+
+async function killSession(hash) {
+  try {
+    await api(`/sessions/${encodeURIComponent(hash)}`, { method: 'DELETE' });
+    showToast('Session terminated');
+    renderSessionsSettings();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function killOtherSessions() {
+  try {
+    await api('/sessions/reset-others', { method: 'POST' });
+    showToast('Other sessions terminated');
+    renderSessionsSettings();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function renderBlockedSettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  let data;
+  try { data = await api('/blocked'); }
+  catch (err) { sub.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+  sub.innerHTML = '';
+  const users = data.users || [];
+  if (!users.length) { sub.innerHTML = '<div class="tg-empty-state">No blocked users</div>'; return; }
+  users.forEach((u) => {
+    const row = document.createElement('div');
+    row.className = 'tg-blocked-row';
+    row.appendChild(buildAvatarEl({ id: u.id, title: u.name, has_photo: u.has_photo }));
+    const info = document.createElement('div');
+    info.className = 'tg-blocked-info';
+    const name = document.createElement('div');
+    name.textContent = u.name || '';
+    const uname = document.createElement('div');
+    uname.className = 'tg-blocked-username';
+    uname.textContent = u.username ? '@' + u.username : '';
+    info.appendChild(name);
+    info.appendChild(uname);
+    row.appendChild(info);
+    const unblock = document.createElement('button');
+    unblock.className = 'tg-btn';
+    unblock.dataset.tg = 'unblock';
+    unblock.dataset.peer = u.id;
+    unblock.textContent = 'Unblock';
+    row.appendChild(unblock);
+    sub.appendChild(row);
+  });
+}
+
+async function doUnblock(peerId) {
+  try {
+    await api('/unblock', { method: 'POST', body: JSON.stringify({ peer_id: Number(peerId) }) });
+    showToast('Unblocked');
+    renderBlockedSettings();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function render2faSettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  let status;
+  try { status = await api('/2fa/status'); }
+  catch (err) { sub.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+  sub.innerHTML = '';
+
+  const info = document.createElement('div');
+  info.className = 'tg-2fa-status';
+  info.textContent = status.has_password
+    ? 'Two-step verification is enabled.'
+    : 'Two-step verification is disabled.';
+  sub.appendChild(info);
+
+  const form = document.createElement('div');
+  form.className = 'tg-form';
+  const mkField = (key, label, type = 'password') => {
+    const field = document.createElement('div');
+    field.className = 'tg-form-field';
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    const inp = document.createElement('input');
+    inp.type = type;
+    inp.className = 'tg-field-input';
+    inp.dataset.twofaField = key;
+    field.appendChild(lbl);
+    field.appendChild(inp);
+    return field;
+  };
+  if (status.has_password) form.appendChild(mkField('current', 'Current password'));
+  form.appendChild(mkField('password', 'New password'));
+  form.appendChild(mkField('hint', 'Hint (optional)', 'text'));
+  form.appendChild(mkField('email', 'Recovery email (optional)', 'email'));
+
+  const save = document.createElement('button');
+  save.className = 'tg-btn tg-btn-primary';
+  save.dataset.tg = 'save-2fa';
+  save.textContent = 'Save';
+  form.appendChild(save);
+  sub.appendChild(form);
+}
+
+async function save2fa() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  const get = (k) => sub.querySelector(`[data-twofa-field="${k}"]`)?.value ?? '';
+  const password = get('password');
+  if (!password) { showToast('Enter a new password', true); return; }
+  try {
+    await api('/2fa/set', {
+      method: 'POST',
+      body: JSON.stringify({
+        password,
+        hint: get('hint') || undefined,
+        email: get('email') || undefined,
+        current: get('current') || undefined,
+      }),
+    });
+    showToast('Two-step verification updated');
+    render2faSettings();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+// ── Group 2: folders ─────────────────────────────────────────────────────────
+
+async function loadFolders() {
+  try {
+    const data = await api('/folders');
+    folders = data.folders || [];
+  } catch (_) { folders = []; }
+  renderFolderTabs();
+}
+
+function renderFolderTabs() {
+  const tabs = q('[data-tg-folder-tabs]');
+  if (!tabs) return;
+  tabs.innerHTML = '';
+  if (!folders.length) { tabs.hidden = true; return; }
+  tabs.hidden = false;
+  const allTab = document.createElement('button');
+  allTab.className = `tg-folder-tab${activeFolderId === 0 ? ' active' : ''}`;
+  allTab.dataset.tg = 'folder-tab';
+  allTab.dataset.folderId = '0';
+  allTab.textContent = 'All';
+  tabs.appendChild(allTab);
+  folders.forEach((f) => {
+    const tab = document.createElement('button');
+    tab.className = `tg-folder-tab${String(activeFolderId) === String(f.id) ? ' active' : ''}`;
+    tab.dataset.tg = 'folder-tab';
+    tab.dataset.folderId = f.id;
+    tab.textContent = (f.emoticon ? f.emoticon + ' ' : '') + (f.title || 'Folder');
+    tabs.appendChild(tab);
+  });
+  const addTab = document.createElement('button');
+  addTab.className = 'tg-folder-tab tg-folder-tab-add';
+  addTab.dataset.tg = 'new-folder';
+  addTab.textContent = '+';
+  tabs.appendChild(addTab);
+}
+
+async function selectFolder(folderId) {
+  activeFolderId = Number(folderId) || 0;
+  renderFolderTabs();
+  renderDialogSkeletons();
+  await loadDialogs();
+}
+
+function renderFoldersSettings() {
+  const sub = q('[data-tg-settings-sub]');
+  if (!sub) return;
+  sub.innerHTML = '';
+  const newBtn = document.createElement('button');
+  newBtn.className = 'tg-btn tg-btn-primary';
+  newBtn.dataset.tg = 'new-folder';
+  newBtn.textContent = 'Create New Folder';
+  sub.appendChild(newBtn);
+  if (!folders.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tg-empty-state';
+    empty.textContent = 'No folders yet';
+    sub.appendChild(empty);
+    return;
+  }
+  folders.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'tg-settings-row tg-folder-settings-row';
+    const name = document.createElement('span');
+    name.textContent = (f.emoticon ? f.emoticon + ' ' : '') + (f.title || 'Folder');
+    row.appendChild(name);
+    const del = document.createElement('button');
+    del.className = 'tg-btn tg-btn-danger';
+    del.dataset.tg = 'delete-folder';
+    del.dataset.folderId = f.id;
+    del.textContent = 'Delete';
+    row.appendChild(del);
+    sub.appendChild(row);
+  });
+}
+
+async function openFolderEditor() {
+  const menu = q('[data-tg-new-menu]');
+  if (menu) menu.hidden = true;
+  let contacts = [];
+  try { const data = await api('/dialogs?limit=100'); contacts = data.dialogs || []; } catch (_) {}
+
+  const selectedIds = new Set();
+  const body = document.createElement('div');
+
+  const titleInput = document.createElement('input');
+  titleInput.className = 'tg-field-input';
+  titleInput.placeholder = 'Folder name';
+  titleInput.type = 'text';
+  body.appendChild(titleInput);
+
+  const pickerList = document.createElement('div');
+  pickerList.className = 'tg-picker-list';
+  contacts.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'tg-picker-row';
+    row.appendChild(buildAvatarEl(c));
+    const name = document.createElement('span');
+    name.textContent = c.title || String(c.id);
+    row.appendChild(name);
+    row.addEventListener('click', () => {
+      if (selectedIds.has(c.id)) { selectedIds.delete(c.id); row.classList.remove('selected'); }
+      else { selectedIds.add(c.id); row.classList.add('selected'); }
+    });
+    pickerList.appendChild(row);
+  });
+  body.appendChild(pickerList);
+
+  openModal('New Folder', body, [
+    {
+      label: 'Create',
+      primary: true,
+      action: async () => {
+        const title = titleInput.value.trim();
+        if (!title) { showToast('Enter a name', true); return; }
+        closeModal();
+        try {
+          await api('/folders', {
+            method: 'POST',
+            body: JSON.stringify({ title, peer_ids: Array.from(selectedIds) }),
+          });
+          showToast('Folder created');
+          await loadFolders();
+          const sub = q('[data-tg-settings-sub]');
+          if (sub && !sub.hidden) renderFoldersSettings();
+        } catch (err) { showToast('Failed: ' + err.message, true); }
+      },
+    },
+    { label: 'Cancel', action: closeModal },
+  ]);
+}
+
+async function deleteFolder(folderId) {
+  try {
+    await api(`/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' });
+    showToast('Folder deleted');
+    if (String(activeFolderId) === String(folderId)) activeFolderId = 0;
+    await loadFolders();
+    await loadDialogs();
+    const sub = q('[data-tg-settings-sub]');
+    if (sub && !sub.hidden) renderFoldersSettings();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+// ── Group 2: Saved Messages ──────────────────────────────────────────────────
+
+function openSavedMessages() {
+  if (!meId) { showToast('Could not resolve your account', true); return; }
+  if (!dialogs.find((d) => String(d.id) === String(meId))) {
+    dialogs.unshift({ id: meId, title: 'Saved Messages', type: 'user', has_photo: !!me?.has_photo });
+  }
+  openChat(meId);
+}
+
+// ── Group 3: chat manage panel ───────────────────────────────────────────────
+
+function openManage(peerId) {
+  if (!peerId) return;
+  const panel = q('[data-tg-manage]');
+  if (!panel) return;
+  panel.hidden = false;
+  manageTab = 'members';
+  selectManageTab('members');
+}
+
+function closeManage() {
+  const panel = q('[data-tg-manage]');
+  if (panel) panel.hidden = true;
+}
+
+function selectManageTab(tab) {
+  manageTab = tab || 'members';
+  const panel = q('[data-tg-manage]');
+  if (!panel) return;
+  panel.querySelectorAll('.tg-manage-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === manageTab));
+  if (manageTab === 'members') renderManageMembers();
+  else if (manageTab === 'permissions') renderManagePermissions();
+  else if (manageTab === 'invites') renderManageInvites();
+}
+
+async function renderManageMembers(query = '') {
+  const body = q('[data-tg-manage-body]');
+  if (!body || !activePeer) return;
+  body.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'tg-manage-members-head';
+  const search = document.createElement('input');
+  search.className = 'tg-field-input';
+  search.type = 'search';
+  search.placeholder = 'Search members…';
+  search.value = query;
+  search.addEventListener('input', () => {
+    clearTimeout(search._t);
+    search._t = setTimeout(() => renderManageMembers(search.value.trim()), 300);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'tg-btn';
+  addBtn.dataset.tg = 'add-members';
+  addBtn.textContent = '+ Add';
+  head.appendChild(search);
+  head.appendChild(addBtn);
+  body.appendChild(head);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'tg-member-list';
+  listEl.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  body.appendChild(listEl);
+
+  try {
+    const data = await api(`/members/${encodeURIComponent(activePeer.id)}?limit=100&q=${encodeURIComponent(query)}`);
+    manageMembers = data.members || [];
+    listEl.innerHTML = '';
+    if (!manageMembers.length) { listEl.innerHTML = '<div class="tg-empty-state">No members</div>'; return; }
+    manageMembers.forEach((m) => {
+      const row = document.createElement('div');
+      row.className = 'tg-member';
+      row.appendChild(buildAvatarEl({ id: m.id, title: m.name, has_photo: m.has_photo }));
+      const info = document.createElement('div');
+      info.className = 'tg-member-info';
+      const name = document.createElement('div');
+      name.textContent = m.name || '';
+      const role = document.createElement('div');
+      role.className = 'tg-member-role';
+      role.textContent = m.rank || (m.is_creator ? 'Owner' : (m.is_admin ? 'Admin' : (m.status || 'Member')));
+      info.appendChild(name);
+      info.appendChild(role);
+      row.appendChild(info);
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'tg-member-menu-btn';
+      menuBtn.dataset.tg = 'member-menu';
+      menuBtn.dataset.user = m.id;
+      menuBtn.textContent = '⋮';
+      row.appendChild(menuBtn);
+      listEl.appendChild(row);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function openMemberMenu(btn) {
+  closeContextMenu();
+  const userId = btn.dataset.user;
+  const member = manageMembers.find((m) => String(m.id) === String(userId)) || {};
+  const menu = document.createElement('div');
+  menu.className = 'tg-ctx-menu';
+  const items = [
+    { tg: 'member-promote', label: member.is_admin ? 'Dismiss admin' : 'Promote to admin' },
+    { tg: 'member-restrict', label: member.status === 'restricted' || member.status === 'banned' ? 'Unrestrict' : 'Restrict' },
+    { tg: 'member-remove', label: 'Remove from chat', danger: true },
+  ];
+  items.forEach((it) => {
+    const el = document.createElement('div');
+    el.className = `tg-ctx-item${it.danger ? ' danger' : ''}`;
+    el.dataset.tg = it.tg;
+    el.dataset.user = userId;
+    el.textContent = it.label;
+    // The ctx menu lives on document.body (outside the delegated root), so wire directly.
+    el.addEventListener('click', () => {
+      closeContextMenu();
+      if (it.tg === 'member-promote') memberPromote(userId);
+      else if (it.tg === 'member-restrict') memberRestrict(userId);
+      else if (it.tg === 'member-remove') memberRemove(userId);
+    });
+    menu.appendChild(el);
+  });
+  document.body.appendChild(menu);
+  activeCtxMenu = menu;
+  const rect = btn.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.left = rect.left + 'px';
+  menu.style.top = rect.bottom + 'px';
+  requestAnimationFrame(() => {
+    const mr = menu.getBoundingClientRect();
+    if (mr.right > window.innerWidth - 8) menu.style.left = Math.max(4, window.innerWidth - mr.width - 8) + 'px';
+    if (mr.bottom > window.innerHeight - 8) menu.style.top = Math.max(4, rect.top - mr.height) + 'px';
+  });
+}
+
+async function memberPromote(userId) {
+  if (!activePeer) return;
+  const member = manageMembers.find((m) => String(m.id) === String(userId)) || {};
+  const admin = !member.is_admin;
+  try {
+    await api('/members/promote', {
+      method: 'POST',
+      body: JSON.stringify({ peer_id: activePeer.id, user_id: Number(userId), admin }),
+    });
+    showToast(admin ? 'Promoted to admin' : 'Admin dismissed');
+    renderManageMembers();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function memberRestrict(userId) {
+  if (!activePeer) return;
+  const member = manageMembers.find((m) => String(m.id) === String(userId)) || {};
+  const banned = !(member.status === 'restricted' || member.status === 'banned');
+  try {
+    await api('/members/restrict', {
+      method: 'POST',
+      body: JSON.stringify({ peer_id: activePeer.id, user_id: Number(userId), banned }),
+    });
+    showToast(banned ? 'Restricted' : 'Unrestricted');
+    renderManageMembers();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function memberRemove(userId) {
+  if (!activePeer) return;
+  confirmModal('Remove this member from the chat?', async () => {
+    try {
+      await api('/members/remove', {
+        method: 'POST',
+        body: JSON.stringify({ peer_id: activePeer.id, user_id: Number(userId) }),
+      });
+      showToast('Member removed');
+      renderManageMembers();
+    } catch (err) { showToast('Failed: ' + err.message, true); }
+  });
+}
+
+async function openAddMembers() {
+  if (!activePeer) return;
+  let contacts = [];
+  try { const data = await api('/contacts'); contacts = data.contacts || []; } catch (_) {}
+  const selectedIds = new Set();
+  const body = document.createElement('div');
+  const pickerList = document.createElement('div');
+  pickerList.className = 'tg-picker-list';
+  contacts.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'tg-picker-row';
+    row.appendChild(buildAvatarEl({ id: c.id, title: c.name, has_photo: c.has_photo }));
+    const name = document.createElement('span');
+    name.textContent = c.name || (c.username ? '@' + c.username : String(c.id));
+    row.appendChild(name);
+    row.addEventListener('click', () => {
+      if (selectedIds.has(c.id)) { selectedIds.delete(c.id); row.classList.remove('selected'); }
+      else { selectedIds.add(c.id); row.classList.add('selected'); }
+    });
+    pickerList.appendChild(row);
+  });
+  body.appendChild(pickerList);
+
+  openModal('Add Members', body, [
+    {
+      label: 'Add',
+      primary: true,
+      action: async () => {
+        if (!selectedIds.size) { showToast('Select at least one contact', true); return; }
+        closeModal();
+        try {
+          await api('/members/add', {
+            method: 'POST',
+            body: JSON.stringify({ peer_id: activePeer.id, user_ids: Array.from(selectedIds) }),
+          });
+          showToast('Members added');
+          renderManageMembers();
+        } catch (err) { showToast('Failed: ' + err.message, true); }
+      },
+    },
+    { label: 'Cancel', action: closeModal },
+  ]);
+}
+
+const PERM_KEYS = [
+  { key: 'send_messages', label: 'Send Messages' },
+  { key: 'send_media', label: 'Send Media' },
+  { key: 'send_stickers', label: 'Send Stickers & GIFs' },
+  { key: 'send_polls', label: 'Send Polls' },
+  { key: 'embed_links', label: 'Embed Links' },
+  { key: 'invite_users', label: 'Add Users' },
+  { key: 'pin_messages', label: 'Pin Messages' },
+  { key: 'change_info', label: 'Change Chat Info' },
+];
+
+async function renderManagePermissions() {
+  const body = q('[data-tg-manage-body]');
+  if (!body || !activePeer) return;
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  let perms;
+  try { perms = await api(`/chat/permissions/${encodeURIComponent(activePeer.id)}`); }
+  catch (err) { body.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`; return; }
+  body.innerHTML = '';
+  const state = { ...perms };
+  PERM_KEYS.forEach(({ key, label }) => {
+    const row = document.createElement('div');
+    row.className = 'tg-perm-row';
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const sw = document.createElement('button');
+    sw.className = `tg-switch${state[key] ? ' on' : ''}`;
+    sw.type = 'button';
+    sw.addEventListener('click', async () => {
+      state[key] = !state[key];
+      sw.classList.toggle('on', state[key]);
+      try {
+        await api('/chat/permissions', {
+          method: 'POST',
+          body: JSON.stringify({ peer_id: activePeer.id, rights: { ...state } }),
+        });
+      } catch (err) {
+        showToast('Failed: ' + err.message, true);
+        state[key] = !state[key];
+        sw.classList.toggle('on', state[key]);
+      }
+    });
+    row.appendChild(sw);
+    body.appendChild(row);
+  });
+}
+
+async function renderManageInvites() {
+  const body = q('[data-tg-manage-body]');
+  if (!body || !activePeer) return;
+  body.innerHTML = '';
+  const createBtn = document.createElement('button');
+  createBtn.className = 'tg-btn tg-btn-primary';
+  createBtn.dataset.tg = 'create-invite';
+  createBtn.textContent = 'Create Invite Link';
+  body.appendChild(createBtn);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'tg-invite-list';
+  listEl.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  body.appendChild(listEl);
+
+  try {
+    const data = await api(`/invites/${encodeURIComponent(activePeer.id)}`);
+    const links = data.links || [];
+    listEl.innerHTML = '';
+    if (!links.length) { listEl.innerHTML = '<div class="tg-empty-state">No invite links</div>'; return; }
+    links.forEach((l) => {
+      const row = document.createElement('div');
+      row.className = `tg-invite${l.revoked ? ' revoked' : ''}`;
+      const link = document.createElement('span');
+      link.className = 'tg-invite-link';
+      link.textContent = l.link;
+      row.appendChild(link);
+      const meta = document.createElement('span');
+      meta.className = 'tg-invite-meta';
+      meta.textContent = `${l.usage || 0} used${l.permanent ? ' · permanent' : ''}${l.revoked ? ' · revoked' : ''}`;
+      row.appendChild(meta);
+      const copy = document.createElement('button');
+      copy.className = 'tg-btn';
+      copy.dataset.tg = 'copy-invite';
+      copy.dataset.link = l.link;
+      copy.textContent = 'Copy';
+      row.appendChild(copy);
+      if (!l.revoked) {
+        const revoke = document.createElement('button');
+        revoke.className = 'tg-btn tg-btn-danger';
+        revoke.dataset.tg = 'revoke-invite';
+        revoke.dataset.link = l.link;
+        revoke.textContent = 'Revoke';
+        row.appendChild(revoke);
+      }
+      listEl.appendChild(row);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+async function createInvite() {
+  if (!activePeer) return;
+  try {
+    await api('/invites', { method: 'POST', body: JSON.stringify({ peer_id: activePeer.id }) });
+    showToast('Invite link created');
+    renderManageInvites();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function revokeInvite(link) {
+  if (!activePeer) return;
+  try {
+    await api('/invites/revoke', { method: 'POST', body: JSON.stringify({ peer_id: activePeer.id, link }) });
+    showToast('Invite revoked');
+    renderManageInvites();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function copyInvite(link) {
+  try { await navigator.clipboard.writeText(link); showToast('Link copied'); }
+  catch (_) { showToast('Copy failed', true); }
+}
+
+// ── Group 3: join / leave ────────────────────────────────────────────────────
+
+function openJoinModal() {
+  const menu = q('[data-tg-new-menu]');
+  if (menu) menu.hidden = true;
+  const body = document.createElement('div');
+  const inp = document.createElement('input');
+  inp.className = 'tg-field-input';
+  inp.type = 'text';
+  inp.placeholder = '@username or t.me/… link';
+  body.appendChild(inp);
+  const preview = document.createElement('div');
+  preview.className = 'tg-join-preview';
+  preview.hidden = true;
+  body.appendChild(preview);
+
+  let resolveTimer = null;
+  inp.addEventListener('input', () => {
+    clearTimeout(resolveTimer);
+    const val = inp.value.trim();
+    if (!val) { preview.hidden = true; return; }
+    resolveTimer = setTimeout(async () => {
+      const uname = val.replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '').replace(/^t\.me\//i, '');
+      if (uname.startsWith('+') || uname.startsWith('joinchat')) {
+        preview.hidden = true; // invite hash — can't preview
+        return;
+      }
+      try {
+        const data = await api(`/resolve/${encodeURIComponent(uname)}`);
+        preview.hidden = false;
+        preview.innerHTML = `<div class="tg-join-preview-title">${esc(data.title || uname)}</div>` +
+          (data.members ? `<div class="tg-join-preview-meta">${data.members} members</div>` : '') +
+          (data.about ? `<div class="tg-join-preview-about">${esc(data.about)}</div>` : '');
+      } catch (_) {
+        preview.hidden = false;
+        preview.innerHTML = '<div class="tg-join-preview-meta">Not found</div>';
+      }
+    }, 400);
+  });
+
+  openModal('Join / Find', body, [
+    {
+      label: 'Join',
+      primary: true,
+      action: () => doJoin(inp.value.trim()),
+    },
+    { label: 'Cancel', action: closeModal },
+  ]);
+}
+
+async function doJoin(target) {
+  if (!target) { showToast('Enter a username or link', true); return; }
+  closeModal();
+  try {
+    const res = await api('/join', { method: 'POST', body: JSON.stringify({ target }) });
+    showToast('Joined');
+    await loadDialogs();
+    if (res.peer_id) openChat(res.peer_id);
+  } catch (err) { showToast('Failed to join: ' + err.message, true); }
+}
+
+async function leaveChat(peerId) {
+  if (!peerId) return;
+  confirmModal('Leave this chat?', async () => {
+    try {
+      await api('/leave', { method: 'POST', body: JSON.stringify({ peer_id: Number(peerId) }) });
+      showToast('Left chat');
+      closeManage();
+      closeProfilePanel();
+      dialogs = dialogs.filter((d) => String(d.id) !== String(peerId));
+      if (activePeer && String(activePeer.id) === String(peerId)) {
+        activePeer = null;
+        const noChat = q('[data-tg-no-chat]');
+        const activeChat = q('[data-tg-active-chat]');
+        if (noChat) noChat.hidden = false;
+        if (activeChat) activeChat.hidden = true;
+        showDialogPane();
+      }
+      renderDialogs(q('[data-tg-search]')?.value?.trim().toLowerCase() || '');
+    } catch (err) { showToast('Failed: ' + err.message, true); }
+  });
+}
+
+// ── Group 4: multi-select & bulk bar ─────────────────────────────────────────
+
+function enterSelectMode() {
+  if (!activePeer) return;
+  selectMode = true;
+  selectedMsgIds.clear();
+  renderMessages(messages);
+  updateBulkBar();
+}
+
+function exitSelectMode() {
+  selectMode = false;
+  selectedMsgIds.clear();
+  renderMessages(messages);
+  updateBulkBar();
+}
+
+function toggleSelect(msgId) {
+  const key = String(msgId);
+  if (selectedMsgIds.has(key)) selectedMsgIds.delete(key);
+  else selectedMsgIds.add(key);
+  // Update row visuals
+  const wrap = q('[data-tg-messages]');
+  const row = wrap?.querySelector(`[data-msg-id="${CSS.escape(key)}"]`);
+  if (row) {
+    const on = selectedMsgIds.has(key);
+    row.classList.toggle('selected', on);
+    const check = row.querySelector('.tg-msg-check');
+    if (check) { check.classList.toggle('checked', on); check.textContent = on ? '✓' : ''; }
+  }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = q('[data-tg-bulk-bar]');
+  const countEl = q('[data-tg-bulk-count]');
+  if (!bar) return;
+  bar.hidden = !selectMode;
+  if (countEl) countEl.textContent = `${selectedMsgIds.size} selected`;
+}
+
+function bulkForward() {
+  if (!selectedMsgIds.size) { showToast('Nothing selected', true); return; }
+  const ids = Array.from(selectedMsgIds).map((x) => (isNaN(Number(x)) ? x : Number(x)));
+  openForwardPicker(ids);
+}
+
+async function bulkDelete() {
+  if (!selectedMsgIds.size || !activePeer) { showToast('Nothing selected', true); return; }
+  const ids = Array.from(selectedMsgIds).map((x) => (isNaN(Number(x)) ? x : Number(x)));
+  confirmModal(`Delete ${ids.length} message${ids.length === 1 ? '' : 's'}?`, async () => {
+    try {
+      await api('/delete', {
+        method: 'POST',
+        body: JSON.stringify({ peer_id: activePeer.id, message_ids: ids, revoke: true }),
+      });
+      messages = messages.filter((m) => !selectedMsgIds.has(String(m.id)));
+      exitSelectMode();
+      renderMessages(messages);
+      showToast('Deleted');
+    } catch (err) { showToast('Failed: ' + err.message, true); }
+  });
+}
+
+async function bulkCopy() {
+  if (!selectedMsgIds.size) { showToast('Nothing selected', true); return; }
+  const texts = messages
+    .filter((m) => selectedMsgIds.has(String(m.id)))
+    .map((m) => m.text || m.media?.caption || '')
+    .filter(Boolean);
+  try {
+    await navigator.clipboard.writeText(texts.join('\n'));
+    showToast('Copied');
+  } catch (_) { showToast('Copy failed', true); }
+}
+
+// ── Group 4: scheduled send ──────────────────────────────────────────────────
+
+function openScheduleModal() {
+  if (!activePeer) return;
+  const ta = q('[data-tg-textarea]');
+  const text = ta?.value.trim();
+  if (!text) { showToast('Type a message first', true); return; }
+
+  const body = document.createElement('div');
+  body.className = 'tg-schedule-picker';
+  const lbl = document.createElement('label');
+  lbl.textContent = 'Send on';
+  const input = document.createElement('input');
+  input.type = 'datetime-local';
+  input.className = 'tg-field-input';
+  const now = new Date(Date.now() + 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  input.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  body.appendChild(lbl);
+  body.appendChild(input);
+
+  const replyToId = (composeMode && composeMode.mode === 'reply') ? composeMode.msgId : null;
+
+  openModal('Schedule Message', body, [
+    {
+      label: 'Schedule',
+      primary: true,
+      action: async () => {
+        const ts = Math.floor(new Date(input.value).getTime() / 1000);
+        if (!ts || ts * 1000 <= Date.now()) { showToast('Pick a future time', true); return; }
+        closeModal();
+        try {
+          const payload = { peer_id: activePeer.id, text, schedule_date: ts };
+          if (replyToId) payload.reply_to_id = replyToId;
+          await api('/send', { method: 'POST', body: JSON.stringify(payload) });
+          if (ta) { ta.value = ''; autoGrow(ta); }
+          const sendBtn = q('[data-tg="send"]');
+          if (sendBtn) sendBtn.disabled = true;
+          cancelComposeMode();
+          showToast('Message scheduled');
+        } catch (err) { showToast('Failed: ' + err.message, true); }
+      },
+    },
+    { label: 'Cancel', action: closeModal },
+  ]);
+}
+
+async function openScheduledList() {
+  if (!activePeer) return;
+  const body = document.createElement('div');
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  openModal('Scheduled Messages', body, [{ label: 'Close', action: closeModal }]);
+  try {
+    const data = await api(`/scheduled/${encodeURIComponent(activePeer.id)}`);
+    const msgs = data.messages || [];
+    body.innerHTML = '';
+    if (!msgs.length) { body.innerHTML = '<div class="tg-empty-state">No scheduled messages</div>'; return; }
+    msgs.forEach((m) => {
+      const item = document.createElement('div');
+      item.className = 'tg-scheduled-item';
+      const txt = document.createElement('div');
+      txt.className = 'tg-scheduled-text';
+      txt.textContent = m.text || m.media?.caption || '[media]';
+      const when = document.createElement('div');
+      when.className = 'tg-scheduled-when';
+      when.textContent = m.date ? new Date(m.date * 1000).toLocaleString() : '';
+      item.appendChild(txt);
+      item.appendChild(when);
+      const acts = document.createElement('div');
+      acts.className = 'tg-scheduled-actions';
+      const sendNow = document.createElement('button');
+      sendNow.className = 'tg-btn';
+      sendNow.dataset.tg = 'send-scheduled-now';
+      sendNow.dataset.id = m.id;
+      sendNow.textContent = 'Send now';
+      const del = document.createElement('button');
+      del.className = 'tg-btn tg-btn-danger';
+      del.dataset.tg = 'delete-scheduled';
+      del.dataset.id = m.id;
+      del.textContent = 'Delete';
+      acts.appendChild(sendNow);
+      acts.appendChild(del);
+      item.appendChild(acts);
+      body.appendChild(item);
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+async function sendScheduledNow(msgId) {
+  if (!activePeer) return;
+  try {
+    await api('/scheduled/send', {
+      method: 'POST',
+      body: JSON.stringify({ peer_id: activePeer.id, message_ids: [Number(msgId)] }),
+    });
+    showToast('Sent');
+    openScheduledList();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+async function deleteScheduled(msgId) {
+  if (!activePeer) return;
+  try {
+    await api('/scheduled', {
+      method: 'DELETE',
+      body: JSON.stringify({ peer_id: activePeer.id, message_ids: [Number(msgId)] }),
+    });
+    showToast('Deleted');
+    openScheduledList();
+  } catch (err) { showToast('Failed: ' + err.message, true); }
+}
+
+// ── Group 4: quote reply ─────────────────────────────────────────────────────
+
+/** Quote-reply from the message context menu, capturing any active text selection */
+function quoteReplyForMsg(msg) {
+  const sel = window.getSelection ? window.getSelection().toString().trim() : '';
+  const quoted = sel || (msg.text || '').slice(0, 200);
+  composeMode = { mode: 'reply', msgId: msg.id, msg };
+  composeQuote = quoted ? { text: quoted } : null;
+  showComposeAction('❝ Quote', msg.sender?.name || (msg.out ? 'You' : 'Them'), quoted);
+  q('[data-tg-textarea]')?.focus();
+}
+
+/** Quote-reply invoked from the delegated handler (no specific msg ctx) */
+function quoteReply() {
+  const sel = window.getSelection ? window.getSelection() : null;
+  const text = sel ? sel.toString().trim() : '';
+  if (!text) { showToast('Select text in a message to quote', true); return; }
+  // Find the bubble row containing the selection
+  let node = sel.anchorNode;
+  while (node && node.nodeType !== 1) node = node.parentNode;
+  const row = node ? node.closest?.('[data-msg-id]') : null;
+  const msgId = row?.dataset.msgId;
+  const msg = messages.find((m) => String(m.id) === String(msgId));
+  if (!msg) { showToast('Could not find the quoted message', true); return; }
+  quoteReplyForMsg(msg);
+}
+
+// ── Group 4: reaction details & read-by ──────────────────────────────────────
+
+async function openReactionDetails(msgId) {
+  if (!activePeer) return;
+  const body = document.createElement('div');
+  body.className = 'tg-reaction-list';
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  openModal('Reactions', body, [{ label: 'Close', action: closeModal }]);
+  try {
+    const data = await api(`/reactions/${encodeURIComponent(activePeer.id)}/${encodeURIComponent(msgId)}`);
+    const reactions = data.reactions || [];
+    body.innerHTML = '';
+    if (!reactions.length) { body.innerHTML = '<div class="tg-empty-state">No reactions</div>'; return; }
+    reactions.forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'tg-reaction-list-row';
+      const emoji = document.createElement('span');
+      emoji.className = 'tg-reaction-list-emoji';
+      emoji.textContent = r.emoji || '';
+      const name = document.createElement('span');
+      name.textContent = r.user?.name || '';
+      row.appendChild(name);
+      row.appendChild(emoji);
+      body.appendChild(row);
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+async function openReadBy(msgId) {
+  if (!activePeer) return;
+  const body = document.createElement('div');
+  body.className = 'tg-readby-list';
+  body.innerHTML = '<div class="tg-empty-state">Loading…</div>';
+  openModal('Seen by', body, [{ label: 'Close', action: closeModal }]);
+  try {
+    const data = await api(`/read-by/${encodeURIComponent(activePeer.id)}/${encodeURIComponent(msgId)}`);
+    const users = data.users || [];
+    body.innerHTML = '';
+    if (!users.length) { body.innerHTML = '<div class="tg-empty-state">No one yet</div>'; return; }
+    users.forEach((u) => {
+      const row = document.createElement('div');
+      row.className = 'tg-readby-row';
+      row.textContent = u.name || '';
+      body.appendChild(row);
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="tg-empty-state">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+// ── Group 4: TTL menu ────────────────────────────────────────────────────────
+
+function openTtlMenu() {
+  if (!activePeer) return;
+  const body = document.createElement('div');
+  body.className = 'tg-ttl-menu';
+  const options = [
+    { label: 'Off', seconds: 0 },
+    { label: '24 hours', seconds: 86400 },
+    { label: '7 days', seconds: 604800 },
+    { label: '1 month', seconds: 2592000 },
+  ];
+  options.forEach((o) => {
+    const btn = document.createElement('button');
+    btn.className = 'tg-ttl-opt';
+    btn.textContent = o.label;
+    btn.addEventListener('click', async () => {
+      closeModal();
+      try {
+        await api('/chat/ttl', { method: 'POST', body: JSON.stringify({ peer_id: activePeer.id, seconds: o.seconds }) });
+        showToast(o.seconds ? `Auto-delete: ${o.label}` : 'Auto-delete off');
+      } catch (err) { showToast('Failed: ' + err.message, true); }
+    });
+    body.appendChild(btn);
+  });
+  openModal('Auto-Delete Timer', body, [{ label: 'Cancel', action: closeModal }]);
+}
+
+// ── Group 4: jump-to-message with highlight ──────────────────────────────────
+
+/** Load a window of messages centred on a target id and flash it */
+async function jumpToMessage(targetId) {
+  if (!activePeer) return;
+  // If already loaded, just scroll + flash
+  const wrap = q('[data-tg-messages]');
+  let row = wrap?.querySelector(`[data-msg-id="${CSS.escape(String(targetId))}"]`);
+  if (row) {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    flashMessage(row);
+    return;
+  }
+  try {
+    const payload = await api(`/messages/${encodeURIComponent(activePeer.id)}?limit=50&around_id=${encodeURIComponent(targetId)}`);
+    messages = payload.messages || [];
+    renderMessages(messages);
+    const lm = wrap?.querySelector('[data-tg-load-more]');
+    if (lm) lm.hidden = !payload.has_more;
+    row = wrap?.querySelector(`[data-msg-id="${CSS.escape(String(targetId))}"]`);
+    if (row) { row.scrollIntoView({ behavior: 'auto', block: 'center' }); flashMessage(row); }
+  } catch (err) {
+    showToast('Failed to jump: ' + err.message, true);
+  }
+}
+
+function flashMessage(row) {
+  row.classList.add('highlight', 'tg-flash');
+  setTimeout(() => row.classList.remove('highlight', 'tg-flash'), 1500);
 }
 
 export default { init, openPage, closePage };

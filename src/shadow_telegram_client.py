@@ -91,6 +91,10 @@ _event_queues: Dict[str, collections.deque] = {}
 # Monotonic cursor per user
 _event_cursors: Dict[str, int] = {}
 
+# Wave 3 — cache of sticker/gif Document objects keyed by str(doc.id) so they
+# can be re-sent (send-sticker / send-gif) and served (GET /sticker/{doc_id}).
+_doc_cache: Dict[str, Any] = {}
+
 
 def _next_cursor(slug: str) -> int:
     _event_cursors[slug] = _event_cursors.get(slug, 0) + 1
@@ -426,6 +430,9 @@ async def _normalize_message(message: Any, client: Any, read_max_id: Optional[in
         height: Optional[int] = None
         duration: Optional[float] = None
         size: Optional[int] = None
+        sticker_emoji: Optional[str] = None
+        poll_info: Optional[Dict[str, Any]] = None
+        webpage_info: Optional[Dict[str, Any]] = None
 
         if isinstance(message.media, MessageMediaPhoto):
             mtype = "photo"
@@ -532,14 +539,92 @@ async def _normalize_message(message: Any, client: Any, read_max_id: Optional[in
             peer_id = _peer_id_from_message(message)
             url = f"/api/telegram/media/{peer_id}/{message.id}"
 
+            # sticker emoji (alt) from DocumentAttributeSticker
+            if mtype == "sticker":
+                try:
+                    for attr in getattr(doc, "attributes", []):
+                        if isinstance(attr, DocumentAttributeSticker):
+                            alt = getattr(attr, "alt", None)
+                            if alt:
+                                sticker_emoji = alt
+                                break
+                except Exception:
+                    pass
+
         elif isinstance(message.media, MessageMediaWebPage):
             mtype = "webpage"
+            try:
+                wp = message.media.webpage
+                from telethon.tl.types import WebPage  # type: ignore
+                if isinstance(wp, WebPage):
+                    photo_url = None
+                    if getattr(wp, "photo", None) is not None:
+                        pid = _peer_id_from_message(message)
+                        photo_url = f"/api/telegram/media/{pid}/{message.id}"
+                    webpage_info = {
+                        "url": getattr(wp, "url", None) or "",
+                        "display_url": getattr(wp, "display_url", None) or "",
+                        "site_name": getattr(wp, "site_name", None) or "",
+                        "title": getattr(wp, "title", None) or "",
+                        "description": getattr(wp, "description", None) or "",
+                        "photo_url": photo_url,
+                    }
+            except Exception:
+                pass
         elif isinstance(message.media, MessageMediaGeo):
             mtype = "geo"
         elif isinstance(message.media, MessageMediaContact):
             mtype = "contact"
         elif isinstance(message.media, MessageMediaPoll):
             mtype = "poll"
+            try:
+                poll = message.media.poll
+                results = getattr(message.media, "results", None)
+                # Map option bytes -> result entry
+                voters_by_opt: Dict[int, Dict[str, Any]] = {}
+                total_voters = 0
+                if results is not None:
+                    rlist = getattr(results, "results", None) or []
+                    total_voters = getattr(results, "total_voters", 0) or 0
+                    for r in rlist:
+                        opt_bytes = getattr(r, "option", b"") or b""
+                        opt_idx = opt_bytes[0] if opt_bytes else 0
+                        voters_by_opt[opt_idx] = {
+                            "voters": getattr(r, "voters", 0) or 0,
+                            "chosen": bool(getattr(r, "chosen", False)),
+                            "correct": getattr(r, "correct", None),
+                        }
+                answers = []
+                for ans in getattr(poll, "answers", []) or []:
+                    opt_bytes = getattr(ans, "option", b"") or b""
+                    opt_idx = opt_bytes[0] if opt_bytes else 0
+                    atext = getattr(ans, "text", "")
+                    # Telethon may wrap text in TextWithEntities
+                    if not isinstance(atext, str):
+                        atext = getattr(atext, "text", "") or ""
+                    entry = voters_by_opt.get(opt_idx, {})
+                    correct_val = entry.get("correct", None)
+                    answers.append({
+                        "text": atext,
+                        "option": int(opt_idx),
+                        "voters": int(entry.get("voters", 0)),
+                        "chosen": bool(entry.get("chosen", False)),
+                        "correct": (bool(correct_val) if correct_val is not None else None),
+                    })
+                q = getattr(poll, "question", "")
+                if not isinstance(q, str):
+                    q = getattr(q, "text", "") or ""
+                poll_info = {
+                    "question": q,
+                    "closed": bool(getattr(poll, "closed", False)),
+                    "multiple": bool(getattr(poll, "multiple_choice", False)),
+                    "quiz": bool(getattr(poll, "quiz", False)),
+                    "public": bool(getattr(poll, "public_voters", False)),
+                    "total_voters": int(total_voters),
+                    "answers": answers,
+                }
+            except Exception:
+                pass
         elif isinstance(message.media, MessageMediaVenue):
             mtype = "venue"
         else:
@@ -556,6 +641,12 @@ async def _normalize_message(message: Any, client: Any, read_max_id: Optional[in
             "duration": duration,
             "caption": caption,
         }
+        if sticker_emoji:
+            media_info["sticker_emoji"] = sticker_emoji
+        if poll_info is not None:
+            media_info["poll"] = poll_info
+        if webpage_info is not None:
+            media_info["webpage"] = webpage_info
 
     # Service message (channel migration, pin, join, etc.)
     service_text: Optional[str] = None
@@ -893,9 +984,34 @@ async def logout(username: str) -> None:
 # Dialogs
 # ---------------------------------------------------------------------------
 
-async def get_dialogs(username: str, limit: int = 50, folder: int = 0) -> List[Dict[str, Any]]:
+async def get_dialogs(username: str, limit: int = 50, folder: int = 0, folder_id: int = 0) -> List[Dict[str, Any]]:
     slug = _slug(username)
     client = await _get_client(slug)
+
+    # If a chat-folder (DialogFilter) is requested, resolve its peer set so we
+    # can restrict the returned dialogs to that filter's members.
+    allowed_ids: Optional[set] = None
+    if folder_id:
+        try:
+            from telethon.tl import functions as _fn  # type: ignore
+            from telethon import utils as _u  # type: ignore
+            filters = await client(_fn.messages.GetDialogFiltersRequest())
+            flist = getattr(filters, "filters", None)
+            if flist is None:
+                flist = filters  # older telethon returned a bare list
+            allowed_ids = set()
+            for f in flist or []:
+                if getattr(f, "id", None) != folder_id:
+                    continue
+                for grp in ("pinned_peers", "include_peers"):
+                    for ip in getattr(f, grp, None) or []:
+                        try:
+                            allowed_ids.add(int(_u.get_peer_id(ip)))
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.debug("get_dialogs folder_id resolve error: %s", exc)
+            allowed_ids = None
 
     import time as _time
     from telethon.tl.types import (  # type: ignore
@@ -1003,6 +1119,9 @@ async def get_dialogs(username: str, limit: int = 50, folder: int = 0) -> List[D
             "unread_mark": unread_mark,
         })
 
+    if allowed_ids is not None:
+        result = [d for d in result if d["id"] in allowed_ids]
+
     return result
 
 
@@ -1029,19 +1148,35 @@ async def get_messages(
     peer_id: int,
     limit: int = 50,
     before_id: int = 0,
+    around_id: int = 0,
 ) -> Tuple[List[Dict[str, Any]], bool]:
-    """Return (messages_oldest_first, has_more)."""
+    """Return (messages_oldest_first, has_more).
+
+    When ``around_id`` is set, load a window centred on that message id
+    (used for jump-to-message); ``before_id`` is ignored in that case.
+    """
     slug = _slug(username)
     client = await _get_client(slug)
 
     entity = await client.get_entity(peer_id)
-    kwargs: Dict[str, Any] = {"limit": limit + 1}
-    if before_id:
-        kwargs["max_id"] = before_id
+    if around_id:
+        kwargs: Dict[str, Any] = {
+            "offset_id": around_id,
+            "add_offset": -(limit // 2),
+            "limit": limit,
+        }
+    else:
+        kwargs = {"limit": limit + 1}
+        if before_id:
+            kwargs["max_id"] = before_id
 
     msgs = await client.get_messages(entity, **kwargs)
-    has_more = len(msgs) > limit
-    msgs = list(msgs[:limit])
+    if around_id:
+        has_more = True
+        msgs = list(msgs)
+    else:
+        has_more = len(msgs) > limit
+        msgs = list(msgs[:limit])
     msgs.reverse()  # oldest first
 
     # Fetch the peer's read-outbox watermark ONCE for the whole thread so
@@ -1067,17 +1202,38 @@ async def send_message(
     peer_id: int,
     text: str,
     reply_to_id: Optional[int] = None,
+    schedule_date: Optional[int] = None,
+    quote: Optional[str] = None,
 ) -> Dict[str, Any]:
     slug = _slug(username)
     client = await _get_client(slug)
 
     entity = await client.get_entity(peer_id)
-    msg = await client.send_message(
-        entity,
-        text,
-        reply_to=reply_to_id,
-        parse_mode="md",
-    )
+
+    kwargs: Dict[str, Any] = {"parse_mode": "md"}
+
+    # Quote reply (partial reply) — build InputReplyToMessage carrying quote_text.
+    reply_to: Any = reply_to_id
+    if quote and reply_to_id:
+        try:
+            from telethon.tl import types as _t  # type: ignore
+            reply_to = _t.InputReplyToMessage(
+                reply_to_msg_id=reply_to_id,
+                quote_text=quote,
+            )
+        except Exception:
+            reply_to = reply_to_id
+    kwargs["reply_to"] = reply_to
+
+    # Scheduled send
+    if schedule_date:
+        try:
+            import datetime as _dt
+            kwargs["schedule"] = _dt.datetime.fromtimestamp(int(schedule_date), tz=_dt.timezone.utc)
+        except Exception:
+            pass
+
+    msg = await client.send_message(entity, text, **kwargs)
     return await _normalize_message(msg, client)
 
 
@@ -1298,11 +1454,20 @@ async def send_media(
     caption: str = "",
     reply_to: Optional[int] = None,
     voice: bool = False,
+    schedule_date: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Send one or more files.  For voice, tries voice_note=True; falls back to document."""
     slug = _slug(username)
     client = await _get_client(slug)
     entity = await client.get_entity(peer_id)
+
+    schedule = None
+    if schedule_date:
+        try:
+            import datetime as _dt
+            schedule = _dt.datetime.fromtimestamp(int(schedule_date), tz=_dt.timezone.utc)
+        except Exception:
+            schedule = None
 
     # Build file-like objects from raw bytes
     file_objs = []
@@ -1322,6 +1487,7 @@ async def send_media(
             voice_note=voice,
             force_document=False,
             parse_mode="md" if caption else None,
+            schedule=schedule,
         )
     except Exception as exc:
         if voice:
@@ -1338,6 +1504,7 @@ async def send_media(
                 voice_note=False,
                 force_document=True,
                 parse_mode="md" if caption else None,
+                schedule=schedule,
             )
         else:
             raise
@@ -1975,3 +2142,1395 @@ async def save_draft(username: str, peer_id: int, text: str) -> None:
             message=text or "",
         )
     )
+
+
+# ===========================================================================
+# Wave 3 — Telegram-Desktop parity
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Group 1 — Rich content & compose
+# ---------------------------------------------------------------------------
+
+def _sticker_dimensions(doc: Any) -> Tuple[Optional[int], Optional[int], bool, bool, str]:
+    """Return (width, height, animated, video, emoji) for a sticker/gif Document."""
+    from telethon.tl import types  # type: ignore
+    width: Optional[int] = None
+    height: Optional[int] = None
+    animated = False
+    video = False
+    emoji = ""
+    mime = getattr(doc, "mime_type", "") or ""
+    if mime == "application/x-tgsticker":
+        animated = True
+    if mime == "video/webm":
+        video = True
+    try:
+        for attr in getattr(doc, "attributes", []):
+            if isinstance(attr, types.DocumentAttributeSticker):
+                emoji = getattr(attr, "alt", None) or emoji
+            elif isinstance(attr, types.DocumentAttributeImageSize):
+                width = getattr(attr, "w", None)
+                height = getattr(attr, "h", None)
+            elif isinstance(attr, types.DocumentAttributeVideo):
+                width = getattr(attr, "w", None) or width
+                height = getattr(attr, "h", None) or height
+    except Exception:
+        pass
+    return width, height, animated, video, emoji
+
+
+def _sticker_to_dict(doc: Any) -> Dict[str, Any]:
+    """Build the contract ``Sticker`` shape from a Document and cache it."""
+    did = str(doc.id)
+    _doc_cache[did] = doc
+    width, height, animated, video, emoji = _sticker_dimensions(doc)
+    return {
+        "id": did,
+        "emoji": emoji,
+        "url": f"/api/telegram/sticker/{did}",
+        "width": int(width) if width else 0,
+        "height": int(height) if height else 0,
+        "animated": bool(animated),
+        "video": bool(video),
+    }
+
+
+async def get_stickers(username: str) -> Dict[str, Any]:
+    """Return recent + faved stickers and all installed sticker sets."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    recent: List[Dict[str, Any]] = []
+    faved: List[Dict[str, Any]] = []
+    sets: List[Dict[str, Any]] = []
+
+    try:
+        res = await client(functions.messages.GetRecentStickersRequest(hash=0))
+        for doc in getattr(res, "stickers", []) or []:
+            recent.append(_sticker_to_dict(doc))
+    except Exception as exc:
+        logger.debug("get_stickers recent error: %s", exc)
+
+    try:
+        res = await client(functions.messages.GetFavedStickersRequest(hash=0))
+        for doc in getattr(res, "stickers", []) or []:
+            faved.append(_sticker_to_dict(doc))
+    except Exception as exc:
+        logger.debug("get_stickers faved error: %s", exc)
+
+    try:
+        allsets = await client(functions.messages.GetAllStickersRequest(hash=0))
+        for stickerset in getattr(allsets, "sets", []) or []:
+            try:
+                full = await client(
+                    functions.messages.GetStickerSetRequest(
+                        stickerset=types.InputStickerSetID(
+                            id=stickerset.id, access_hash=stickerset.access_hash
+                        ),
+                        hash=0,
+                    )
+                )
+                docs = getattr(full, "documents", []) or []
+                sticker_dicts = [_sticker_to_dict(d) for d in docs]
+                thumb_url = sticker_dicts[0]["url"] if sticker_dicts else None
+                sets.append({
+                    "id": str(stickerset.id),
+                    "title": getattr(stickerset, "title", "") or "",
+                    "count": getattr(stickerset, "count", len(sticker_dicts)) or len(sticker_dicts),
+                    "thumb_url": thumb_url,
+                    "stickers": sticker_dicts,
+                })
+            except Exception as exc:
+                logger.debug("get_stickers set error: %s", exc)
+    except Exception as exc:
+        logger.debug("get_stickers sets error: %s", exc)
+
+    return {"recent": recent, "faved": faved, "sets": sets}
+
+
+async def get_gifs(username: str) -> Dict[str, Any]:
+    """Return the user's saved GIFs."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    gifs: List[Dict[str, Any]] = []
+    try:
+        res = await client(functions.messages.GetSavedGifsRequest(hash=0))
+        for doc in getattr(res, "gifs", []) or []:
+            did = str(doc.id)
+            _doc_cache[did] = doc
+            width, height, _a, _v, _e = _sticker_dimensions(doc)
+            gifs.append({
+                "id": did,
+                "url": f"/api/telegram/sticker/{did}",
+                "thumb_url": f"/api/telegram/sticker/{did}",
+                "width": int(width) if width else 0,
+                "height": int(height) if height else 0,
+            })
+    except Exception as exc:
+        logger.debug("get_gifs error: %s", exc)
+
+    return {"gifs": gifs}
+
+
+async def get_sticker_bytes(username: str, doc_id: str) -> Optional[Tuple[bytes, str]]:
+    """Serve a cached sticker/gif Document as renderable bytes.
+
+    For animated (.tgs) and video (webm) docs, serve the static thumbnail;
+    for static webp/image docs serve the full document.
+    """
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import types  # type: ignore
+
+    doc = _doc_cache.get(str(doc_id))
+    if doc is None:
+        return None
+
+    cache_path = _cache_dir() / f"sticker_{doc_id}"
+    if cache_path.exists():
+        try:
+            data = cache_path.read_bytes()
+            ct = _sniff_image_ct(data)
+            return data, ct
+        except Exception:
+            pass
+
+    mime = getattr(doc, "mime_type", "") or ""
+    animated = mime == "application/x-tgsticker"
+    video = mime == "video/webm"
+
+    try:
+        if animated or video:
+            # Serve the thumbnail rather than the raw animation.
+            thumbs = getattr(doc, "thumbs", None) or []
+            if thumbs:
+                data = await client.download_media(doc, thumb=-1, file=bytes)
+            else:
+                data = await client.download_media(doc, file=bytes)
+        else:
+            data = await client.download_media(doc, file=bytes)
+        if data is None:
+            return None
+        try:
+            cache_path.write_bytes(data)
+        except Exception:
+            pass
+        ct = _sniff_image_ct(data) if not (mime and mime.startswith("image/")) else mime
+        return data, ct
+    except Exception as exc:
+        logger.debug("get_sticker_bytes(%s) error: %s", doc_id, exc)
+        return None
+
+
+def _sniff_image_ct(data: bytes) -> str:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/webp"
+
+
+async def send_cached_doc(
+    username: str,
+    peer_id: int,
+    doc_id: str,
+    reply_to_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Re-send a cached sticker/gif Document via send_file."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+
+    doc = _doc_cache.get(str(doc_id))
+    if doc is None:
+        raise ValueError("Unknown doc_id (not cached). Reload stickers/gifs first.")
+
+    entity = await client.get_entity(peer_id)
+    sent = await client.send_file(entity, doc, reply_to=reply_to_id)
+    if isinstance(sent, list):
+        sent = sent[-1]
+    return await _normalize_message(sent, client)
+
+
+async def send_poll(
+    username: str,
+    peer_id: int,
+    question: str,
+    options: List[str],
+    multiple: bool = False,
+    quiz: bool = False,
+    correct: Optional[int] = None,
+    public: bool = False,
+) -> Dict[str, Any]:
+    """Create and send a poll (or quiz)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+
+    answers = [
+        types.PollAnswer(text=opt, option=bytes([i]))
+        for i, opt in enumerate(options)
+    ]
+    poll = types.Poll(
+        id=0,
+        question=question,
+        answers=answers,
+        closed=False,
+        public_voters=bool(public),
+        multiple_choice=bool(multiple) and not quiz,
+        quiz=bool(quiz),
+    )
+    correct_answers = None
+    if quiz and correct is not None:
+        correct_answers = [bytes([int(correct)])]
+
+    media = types.InputMediaPoll(
+        poll=poll,
+        correct_answers=correct_answers,
+    )
+
+    result = await client(
+        functions.messages.SendMediaRequest(
+            peer=entity,
+            media=media,
+            message="",
+            random_id=client._get_random_id() if hasattr(client, "_get_random_id") else _random_id(),
+        )
+    )
+    msg = _message_from_updates(result)
+    if msg is not None:
+        return await _normalize_message(msg, client)
+    return {"ok": True}
+
+
+def _random_id() -> int:
+    import random
+    return random.getrandbits(63) - (1 << 62)
+
+
+def _message_from_updates(updates: Any) -> Optional[Any]:
+    """Extract a Message from an Updates result (best-effort)."""
+    from telethon.tl import types  # type: ignore
+    try:
+        upds = getattr(updates, "updates", None) or []
+        for u in upds:
+            msg = getattr(u, "message", None)
+            if isinstance(msg, (types.Message, types.MessageService)):
+                return msg
+        # Single-update variants
+        msg = getattr(updates, "message", None)
+        if isinstance(msg, (types.Message, types.MessageService)):
+            return msg
+    except Exception:
+        pass
+    return None
+
+
+async def vote_poll(
+    username: str,
+    peer_id: int,
+    message_id: int,
+    options: List[int],
+) -> Dict[str, Any]:
+    """Vote in a poll; returns the updated normalized message."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    result = await client(
+        functions.messages.SendVoteRequest(
+            peer=entity,
+            msg_id=message_id,
+            options=[bytes([int(i)]) for i in options],
+        )
+    )
+    msg = _message_from_updates(result)
+    if msg is not None:
+        return await _normalize_message(msg, client)
+    # Fallback: refetch the message
+    try:
+        msgs = await client.get_messages(entity, ids=message_id)
+        m = msgs[0] if isinstance(msgs, list) else msgs
+        if m is not None:
+            return await _normalize_message(m, client)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Group 2 — Settings & account
+# ---------------------------------------------------------------------------
+
+async def get_me_full(username: str) -> Dict[str, Any]:
+    """Return the logged-in user's profile (incl. bio)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    me = await client.get_me()
+    fname = getattr(me, "first_name", None) or ""
+    lname = getattr(me, "last_name", None) or ""
+    name = (fname + " " + lname).strip() or getattr(me, "username", None) or str(me.id)
+    bio = ""
+    try:
+        full = await client(functions.users.GetFullUserRequest(id=me))
+        full_user = getattr(full, "full_user", None)
+        if full_user is not None:
+            bio = getattr(full_user, "about", None) or ""
+    except Exception as exc:
+        logger.debug("get_me_full bio error: %s", exc)
+
+    return {
+        "id": int(me.id),
+        "first": fname,
+        "last": lname,
+        "name": name,
+        "username": getattr(me, "username", None),
+        "phone": getattr(me, "phone", None),
+        "bio": bio,
+        "has_photo": getattr(me, "photo", None) is not None,
+    }
+
+
+async def update_profile(
+    username: str,
+    first: Optional[str] = None,
+    last: Optional[str] = None,
+    bio: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update profile first/last/bio. Returns the refreshed /me dict."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    kwargs: Dict[str, Any] = {}
+    if first is not None:
+        kwargs["first_name"] = first
+    if last is not None:
+        kwargs["last_name"] = last
+    if bio is not None:
+        kwargs["about"] = bio
+    if kwargs:
+        await client(functions.account.UpdateProfileRequest(**kwargs))
+    return await get_me_full(username)
+
+
+async def update_username(username: str, new_username: str) -> Dict[str, Any]:
+    """Set or clear the account username (empty clears)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    await client(functions.account.UpdateUsernameRequest(username=new_username or ""))
+    return {"ok": True, "username": new_username or ""}
+
+
+async def set_profile_photo(username: str, filename: str, data: bytes) -> Dict[str, Any]:
+    """Upload and set a new profile photo."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    buf = io.BytesIO(data)
+    buf.name = filename or "photo.jpg"
+    uploaded = await client.upload_file(buf)
+    await client(functions.photos.UploadProfilePhotoRequest(file=uploaded))
+    # Invalidate cached avatar
+    try:
+        me = await client.get_me()
+        from telethon import utils  # type: ignore
+        (_cache_dir() / f"avatar_{int(utils.get_peer_id(me))}.jpg").unlink(missing_ok=True)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+async def delete_profile_photo(username: str) -> Dict[str, Any]:
+    """Delete the current profile photo."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    me = await client.get_me()
+    res = await client(
+        functions.photos.GetUserPhotosRequest(user_id=me, offset=0, max_id=0, limit=1)
+    )
+    photos = getattr(res, "photos", []) or []
+    if photos:
+        await client(functions.photos.DeletePhotosRequest(id=[
+            types.InputPhoto(
+                id=photos[0].id,
+                access_hash=photos[0].access_hash,
+                file_reference=photos[0].file_reference,
+            )
+        ]))
+    return {"ok": True}
+
+
+# Privacy key -> (InputPrivacyKey class name)
+_PRIVACY_KEYS = {
+    "last_seen": "InputPrivacyKeyStatusTimestamp",
+    "phone": "InputPrivacyKeyPhoneNumber",
+    "profile_photo": "InputPrivacyKeyProfilePhoto",
+    "calls": "InputPrivacyKeyPhoneCall",
+    "forwards": "InputPrivacyKeyForwards",
+    "groups": "InputPrivacyKeyChatInvite",
+}
+
+
+def _privacy_bucket(rules: Any) -> str:
+    """Map a list of PrivacyRule to one of everybody|contacts|nobody."""
+    from telethon.tl import types  # type: ignore
+    has_allow_all = False
+    has_allow_contacts = False
+    has_disallow_all = False
+    for r in rules or []:
+        if isinstance(r, types.PrivacyValueAllowAll):
+            has_allow_all = True
+        elif isinstance(r, types.PrivacyValueAllowContacts):
+            has_allow_contacts = True
+        elif isinstance(r, types.PrivacyValueDisallowAll):
+            has_disallow_all = True
+    if has_allow_all:
+        return "everybody"
+    if has_allow_contacts:
+        return "contacts"
+    if has_disallow_all:
+        return "nobody"
+    return "nobody"
+
+
+async def get_privacy(username: str) -> Dict[str, Any]:
+    """Return privacy buckets for each supported key."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    out: Dict[str, Any] = {}
+    for key, cls_name in _PRIVACY_KEYS.items():
+        try:
+            cls = getattr(types, cls_name)
+            res = await client(functions.account.GetPrivacyRequest(key=cls()))
+            out[key] = _privacy_bucket(getattr(res, "rules", None))
+        except Exception as exc:
+            logger.debug("get_privacy %s error: %s", key, exc)
+            out[key] = "nobody"
+    return out
+
+
+async def set_privacy(username: str, key: str, value: str) -> Dict[str, Any]:
+    """Set a privacy key to everybody|contacts|nobody."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    cls_name = _PRIVACY_KEYS.get(key)
+    if cls_name is None:
+        raise ValueError(f"Unknown privacy key: {key}")
+    key_cls = getattr(types, cls_name)
+
+    if value == "everybody":
+        rules = [types.InputPrivacyValueAllowAll()]
+    elif value == "contacts":
+        rules = [types.InputPrivacyValueAllowContacts()]
+    elif value == "nobody":
+        rules = [types.InputPrivacyValueDisallowAll()]
+    else:
+        raise ValueError(f"Unknown privacy value: {value}")
+
+    await client(
+        functions.account.SetPrivacyRequest(key=key_cls(), rules=rules)
+    )
+    return {"ok": True}
+
+
+async def get_sessions(username: str) -> Dict[str, Any]:
+    """Return active authorizations (sessions)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    res = await client(functions.account.GetAuthorizationsRequest())
+    sessions: List[Dict[str, Any]] = []
+    for a in getattr(res, "authorizations", []) or []:
+        last_active = 0
+        try:
+            la = getattr(a, "date_active", None)
+            if la is not None:
+                last_active = int(la.timestamp())
+        except Exception:
+            pass
+        sessions.append({
+            "hash": str(getattr(a, "hash", 0)),
+            "current": bool(getattr(a, "current", False)),
+            "device": getattr(a, "device_model", "") or "",
+            "platform": getattr(a, "platform", "") or "",
+            "app": ((getattr(a, "app_name", "") or "") + " " + (getattr(a, "app_version", "") or "")).strip(),
+            "ip": getattr(a, "ip", "") or "",
+            "country": getattr(a, "country", "") or "",
+            "last_active": last_active,
+        })
+    return {"sessions": sessions}
+
+
+async def reset_session(username: str, hash_: str) -> Dict[str, Any]:
+    """Terminate one session by its hash."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    await client(functions.account.ResetAuthorizationRequest(hash=int(hash_)))
+    return {"ok": True}
+
+
+async def reset_other_sessions(username: str) -> Dict[str, Any]:
+    """Terminate all sessions except the current one."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    await client(functions.auth.ResetAuthorizationsRequest())
+    return {"ok": True}
+
+
+async def get_blocked(username: str) -> Dict[str, Any]:
+    """Return the blocked-users list."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+    from telethon import utils  # type: ignore
+
+    res = await client(functions.contacts.GetBlockedRequest(offset=0, limit=100))
+    users_by_id: Dict[int, Any] = {}
+    for u in getattr(res, "users", []) or []:
+        users_by_id[u.id] = u
+
+    out: List[Dict[str, Any]] = []
+    blocked = getattr(res, "blocked", []) or []
+    for b in blocked:
+        try:
+            peer = getattr(b, "peer_id", None)
+            uid = getattr(peer, "user_id", None) if peer is not None else None
+            u = users_by_id.get(uid) if uid is not None else None
+            if u is None:
+                continue
+            fname = getattr(u, "first_name", None) or ""
+            lname = getattr(u, "last_name", None) or ""
+            name = (fname + " " + lname).strip() or getattr(u, "username", None) or str(u.id)
+            out.append({
+                "id": int(utils.get_peer_id(u)),
+                "name": name,
+                "username": getattr(u, "username", None),
+            })
+        except Exception as exc:
+            logger.debug("get_blocked item error: %s", exc)
+    return {"users": out}
+
+
+async def block_user(username: str, peer_id: int) -> Dict[str, Any]:
+    """Block a user."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    await client(functions.contacts.BlockRequest(id=entity))
+    return {"ok": True}
+
+
+async def unblock_user(username: str, peer_id: int) -> Dict[str, Any]:
+    """Unblock a user."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    await client(functions.contacts.UnblockRequest(id=entity))
+    return {"ok": True}
+
+
+async def get_2fa_status(username: str) -> Dict[str, Any]:
+    """Return 2FA/cloud-password status."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    pw = await client(functions.account.GetPasswordRequest())
+    return {
+        "has_password": bool(getattr(pw, "has_password", False)),
+        "hint": getattr(pw, "hint", None) or "",
+        "email_unconfirmed": bool(getattr(pw, "email_unconfirmed_pattern", None)),
+    }
+
+
+async def set_2fa(
+    username: str,
+    password: str,
+    hint: Optional[str] = None,
+    email: Optional[str] = None,
+    current: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Set or change the cloud (2FA) password."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+
+    await client.edit_2fa(
+        current_password=current or None,
+        new_password=password,
+        hint=hint or "",
+        email=email or None,
+    )
+    return {"ok": True}
+
+
+async def get_folders(username: str) -> Dict[str, Any]:
+    """Return chat folders (DialogFilters), excluding the default/all one."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    res = await client(functions.messages.GetDialogFiltersRequest())
+    flist = getattr(res, "filters", None)
+    if flist is None:
+        flist = res
+    folders: List[Dict[str, Any]] = []
+    for f in flist or []:
+        # Skip the default "all chats" filter
+        if isinstance(f, getattr(types, "DialogFilterDefault", ())):
+            continue
+        fid = getattr(f, "id", None)
+        if fid is None:
+            continue
+        title = getattr(f, "title", "") or ""
+        if not isinstance(title, str):
+            title = getattr(title, "text", "") or ""
+        folders.append({
+            "id": int(fid),
+            "title": title,
+            "emoticon": getattr(f, "emoticon", None) or "",
+        })
+    return {"folders": folders}
+
+
+async def save_folder(
+    username: str,
+    title: str,
+    peer_ids: List[int],
+    folder_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Create or update a chat folder."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    if folder_id is None:
+        # Pick a free id (Telegram folder ids start at 2)
+        existing = await get_folders(username)
+        used = {f["id"] for f in existing["folders"]}
+        folder_id = 2
+        while folder_id in used:
+            folder_id += 1
+
+    include_peers = []
+    for pid in peer_ids or []:
+        try:
+            include_peers.append(await client.get_input_entity(pid))
+        except Exception:
+            pass
+
+    dialog_filter = types.DialogFilter(
+        id=int(folder_id),
+        title=title,
+        pinned_peers=[],
+        include_peers=include_peers,
+        exclude_peers=[],
+        contacts=False,
+        non_contacts=False,
+        groups=False,
+        broadcasts=False,
+        bots=False,
+        exclude_muted=False,
+        exclude_read=False,
+        exclude_archived=False,
+        emoticon=None,
+    )
+    await client(
+        functions.messages.UpdateDialogFilterRequest(id=int(folder_id), filter=dialog_filter)
+    )
+    return {"ok": True, "id": int(folder_id)}
+
+
+async def delete_folder(username: str, folder_id: int) -> Dict[str, Any]:
+    """Delete a chat folder."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    await client(
+        functions.messages.UpdateDialogFilterRequest(id=int(folder_id), filter=None)
+    )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Group 3 — Group & channel admin
+# ---------------------------------------------------------------------------
+
+def _participant_status(participant: Any) -> Tuple[str, bool, bool, str, bool]:
+    """Return (status, is_admin, is_creator, rank, can_edit) from a participant."""
+    from telethon.tl import types  # type: ignore
+    status = "member"
+    is_admin = False
+    is_creator = False
+    rank = ""
+    can_edit = False
+    if isinstance(participant, types.ChannelParticipantCreator):
+        status = "creator"
+        is_creator = True
+        is_admin = True
+        rank = getattr(participant, "rank", None) or ""
+    elif isinstance(participant, types.ChannelParticipantAdmin):
+        status = "admin"
+        is_admin = True
+        rank = getattr(participant, "rank", None) or ""
+        can_edit = bool(getattr(participant, "can_edit", False))
+    elif isinstance(participant, types.ChannelParticipantBanned):
+        banned_rights = getattr(participant, "banned_rights", None)
+        if banned_rights is not None and getattr(banned_rights, "view_messages", False):
+            status = "banned"
+        else:
+            status = "restricted"
+    elif isinstance(participant, types.ChannelParticipantLeft):
+        status = "member"
+    return status, is_admin, is_creator, rank, can_edit
+
+
+async def get_members(
+    username: str,
+    peer_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    q: str = "",
+) -> Dict[str, Any]:
+    """List members of a group/channel."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+    from telethon.tl.types import Channel, Chat  # type: ignore
+    from telethon import utils  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    members: List[Dict[str, Any]] = []
+    count = 0
+
+    def _user_name(u: Any) -> str:
+        fname = getattr(u, "first_name", None) or ""
+        lname = getattr(u, "last_name", None) or ""
+        return (fname + " " + lname).strip() or getattr(u, "username", None) or str(getattr(u, "id", ""))
+
+    if isinstance(entity, Channel):
+        flt = types.ChannelParticipantsSearch(q) if q else types.ChannelParticipantsRecent()
+        res = await client(
+            functions.channels.GetParticipantsRequest(
+                channel=entity,
+                filter=flt,
+                offset=offset,
+                limit=limit,
+                hash=0,
+            )
+        )
+        count = getattr(res, "count", 0) or 0
+        users_by_id = {u.id: u for u in getattr(res, "users", []) or []}
+        for p in getattr(res, "participants", []) or []:
+            try:
+                uid = getattr(p, "user_id", None)
+                if uid is None:
+                    peer = getattr(p, "peer", None)
+                    uid = getattr(peer, "user_id", None) if peer is not None else None
+                u = users_by_id.get(uid)
+                if u is None:
+                    continue
+                status, is_admin, is_creator, rank, can_edit = _participant_status(p)
+                members.append({
+                    "id": int(utils.get_peer_id(u)),
+                    "name": _user_name(u),
+                    "username": getattr(u, "username", None),
+                    "status": status,
+                    "is_admin": is_admin,
+                    "is_creator": is_creator,
+                    "rank": rank,
+                    "can_edit": can_edit,
+                })
+            except Exception as exc:
+                logger.debug("get_members item error: %s", exc)
+    elif isinstance(entity, Chat):
+        full = await client(functions.messages.GetFullChatRequest(chat_id=entity.id))
+        users_by_id = {u.id: u for u in getattr(full, "users", []) or []}
+        participants = getattr(getattr(full, "full_chat", None), "participants", None)
+        plist = getattr(participants, "participants", []) or []
+        count = len(plist)
+        for p in plist:
+            try:
+                uid = getattr(p, "user_id", None)
+                u = users_by_id.get(uid)
+                if u is None:
+                    continue
+                status = "member"
+                is_admin = False
+                is_creator = False
+                if isinstance(p, types.ChatParticipantCreator):
+                    status = "creator"
+                    is_creator = True
+                    is_admin = True
+                elif isinstance(p, types.ChatParticipantAdmin):
+                    status = "admin"
+                    is_admin = True
+                members.append({
+                    "id": int(utils.get_peer_id(u)),
+                    "name": _user_name(u),
+                    "username": getattr(u, "username", None),
+                    "status": status,
+                    "is_admin": is_admin,
+                    "is_creator": is_creator,
+                    "rank": "",
+                    "can_edit": False,
+                })
+            except Exception as exc:
+                logger.debug("get_members chat item error: %s", exc)
+        if q:
+            ql = q.lower()
+            members = [m for m in members if ql in m["name"].lower() or ql in (m.get("username") or "").lower()]
+            count = len(members)
+
+    return {"count": int(count), "members": members}
+
+
+async def add_members(username: str, peer_id: int, user_ids: List[int]) -> Dict[str, Any]:
+    """Add users to a group or channel."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+    from telethon.tl.types import Channel, Chat  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    inputs = []
+    for uid in user_ids or []:
+        try:
+            inputs.append(await client.get_input_entity(uid))
+        except Exception:
+            pass
+
+    if isinstance(entity, Channel):
+        await client(functions.channels.InviteToChannelRequest(channel=entity, users=inputs))
+    elif isinstance(entity, Chat):
+        for ip in inputs:
+            try:
+                await client(
+                    functions.messages.AddChatUserRequest(chat_id=entity.id, user_id=ip, fwd_limit=50)
+                )
+            except Exception as exc:
+                logger.debug("add_members chat error: %s", exc)
+    return {"ok": True}
+
+
+async def remove_member(username: str, peer_id: int, user_id: int) -> Dict[str, Any]:
+    """Remove (kick) a user from a group or channel."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+    from telethon.tl.types import Channel, Chat  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    user = await client.get_input_entity(user_id)
+
+    if isinstance(entity, Channel):
+        # Ban (view_messages) then unban to fully kick without leaving a ban entry.
+        await client(
+            functions.channels.EditBannedRequest(
+                channel=entity,
+                participant=user,
+                banned_rights=types.ChatBannedRights(until_date=0, view_messages=True),
+            )
+        )
+        try:
+            await client(
+                functions.channels.EditBannedRequest(
+                    channel=entity,
+                    participant=user,
+                    banned_rights=types.ChatBannedRights(until_date=0),
+                )
+            )
+        except Exception:
+            pass
+    elif isinstance(entity, Chat):
+        await client(
+            functions.messages.DeleteChatUserRequest(chat_id=entity.id, user_id=user)
+        )
+    return {"ok": True}
+
+
+async def promote_member(
+    username: str,
+    peer_id: int,
+    user_id: int,
+    admin: bool,
+    rank: str = "",
+) -> Dict[str, Any]:
+    """Promote a user to admin (all rights) or demote (no rights)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    user = await client.get_input_entity(user_id)
+
+    rights = types.ChatAdminRights(
+        change_info=admin,
+        post_messages=admin,
+        edit_messages=admin,
+        delete_messages=admin,
+        ban_users=admin,
+        invite_users=admin,
+        pin_messages=admin,
+        add_admins=admin,
+        anonymous=False,
+        manage_call=admin,
+        other=admin,
+    )
+    await client(
+        functions.channels.EditAdminRequest(
+            channel=entity,
+            user_id=user,
+            admin_rights=rights,
+            rank=rank or "",
+        )
+    )
+    return {"ok": True}
+
+
+async def restrict_member(
+    username: str,
+    peer_id: int,
+    user_id: int,
+    banned: bool,
+    until: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Restrict/ban (banned=True) or unrestrict (banned=False) a user."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    user = await client.get_input_entity(user_id)
+
+    if banned:
+        rights = types.ChatBannedRights(
+            until_date=int(until) if until else 0,
+            view_messages=True,
+            send_messages=True,
+            send_media=True,
+            send_stickers=True,
+            send_gifs=True,
+            send_games=True,
+            send_inline=True,
+            embed_links=True,
+        )
+    else:
+        rights = types.ChatBannedRights(until_date=0)
+
+    await client(
+        functions.channels.EditBannedRequest(
+            channel=entity,
+            participant=user,
+            banned_rights=rights,
+        )
+    )
+    return {"ok": True}
+
+
+_PERM_KEYS = [
+    "send_messages", "send_media", "send_stickers", "send_polls",
+    "embed_links", "invite_users", "pin_messages", "change_info",
+]
+
+
+async def get_chat_permissions(username: str, peer_id: int) -> Dict[str, Any]:
+    """Return default chat permissions as allowed-flags (true = allowed)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl.types import Channel, Chat  # type: ignore
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    banned = getattr(entity, "default_banned_rights", None)
+    if banned is None:
+        # Fetch via full chat
+        try:
+            if isinstance(entity, Channel):
+                full = await client(functions.channels.GetFullChannelRequest(channel=entity))
+            elif isinstance(entity, Chat):
+                full = await client(functions.messages.GetFullChatRequest(chat_id=entity.id))
+            else:
+                full = None
+            if full is not None:
+                banned = getattr(getattr(full, "full_chat", None), "default_banned_rights", None)
+        except Exception:
+            banned = None
+
+    # banned flag True means NOT allowed → invert.
+    def _allowed(name: str) -> bool:
+        if banned is None:
+            return True
+        # map our key -> ChatBannedRights attr
+        attr_map = {
+            "send_messages": "send_messages",
+            "send_media": "send_media",
+            "send_stickers": "send_stickers",
+            "send_polls": "send_polls",
+            "embed_links": "embed_links",
+            "invite_users": "invite_users",
+            "pin_messages": "pin_messages",
+            "change_info": "change_info",
+        }
+        return not bool(getattr(banned, attr_map[name], False))
+
+    return {k: _allowed(k) for k in _PERM_KEYS}
+
+
+async def set_chat_permissions(username: str, peer_id: int, rights: Dict[str, bool]) -> Dict[str, Any]:
+    """Set default chat permissions from allowed-flags (true = allowed)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions, types  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    input_peer = await client.get_input_entity(entity)
+
+    def _banned(name: str) -> bool:
+        # allowed True → banned False
+        return not bool(rights.get(name, True))
+
+    banned_rights = types.ChatBannedRights(
+        until_date=0,
+        send_messages=_banned("send_messages"),
+        send_media=_banned("send_media"),
+        send_stickers=_banned("send_stickers"),
+        send_gifs=_banned("send_stickers"),
+        send_polls=_banned("send_polls"),
+        embed_links=_banned("embed_links"),
+        invite_users=_banned("invite_users"),
+        pin_messages=_banned("pin_messages"),
+        change_info=_banned("change_info"),
+    )
+    await client(
+        functions.messages.EditChatDefaultBannedRightsRequest(
+            peer=input_peer,
+            banned_rights=banned_rights,
+        )
+    )
+    return {"ok": True}
+
+
+async def get_invites(username: str, peer_id: int) -> Dict[str, Any]:
+    """List exported invite links for a chat."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    input_peer = await client.get_input_entity(entity)
+    me = await client.get_me()
+    res = await client(
+        functions.messages.GetExportedChatInvitesRequest(
+            peer=input_peer,
+            admin_id=me,
+            limit=50,
+        )
+    )
+    links: List[Dict[str, Any]] = []
+    for inv in getattr(res, "invites", []) or []:
+        expires = None
+        try:
+            ed = getattr(inv, "expire_date", None)
+            if ed is not None:
+                expires = int(ed.timestamp())
+        except Exception:
+            pass
+        links.append({
+            "link": getattr(inv, "link", "") or "",
+            "revoked": bool(getattr(inv, "revoked", False)),
+            "permanent": bool(getattr(inv, "permanent", False)),
+            "usage": int(getattr(inv, "usage", 0) or 0),
+            "expires": expires,
+        })
+    return {"links": links}
+
+
+async def create_invite(
+    username: str,
+    peer_id: int,
+    expire: Optional[int] = None,
+    usage_limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Create a new invite link."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    input_peer = await client.get_input_entity(entity)
+    kwargs: Dict[str, Any] = {"peer": input_peer}
+    if expire:
+        kwargs["expire_date"] = int(expire)
+    if usage_limit:
+        kwargs["usage_limit"] = int(usage_limit)
+    res = await client(functions.messages.ExportChatInviteRequest(**kwargs))
+    return {"ok": True, "link": getattr(res, "link", "") or ""}
+
+
+async def revoke_invite(username: str, peer_id: int, link: str) -> Dict[str, Any]:
+    """Revoke an invite link."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    input_peer = await client.get_input_entity(entity)
+    await client(
+        functions.messages.EditExportedChatInviteRequest(
+            peer=input_peer,
+            link=link,
+            revoked=True,
+        )
+    )
+    return {"ok": True}
+
+
+async def resolve_target(username: str, target: str) -> Dict[str, Any]:
+    """Resolve a @username (or username) to peer info. Raises if not found."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon import utils  # type: ignore
+    from telethon.tl.types import User, Channel, Chat  # type: ignore
+    from telethon.tl import functions  # type: ignore
+
+    target = (target or "").strip().lstrip("@")
+    entity = await client.get_entity(target)
+    pid = int(utils.get_peer_id(entity))
+    etype = _entity_type(entity)
+    title = _entity_title(entity)
+    members = None
+    about = ""
+    if isinstance(entity, Channel):
+        members = getattr(entity, "participants_count", None)
+        try:
+            full = await client(functions.channels.GetFullChannelRequest(channel=entity))
+            fc = getattr(full, "full_chat", None)
+            if fc is not None:
+                about = getattr(fc, "about", None) or ""
+                if members is None:
+                    members = getattr(fc, "participants_count", None)
+        except Exception:
+            pass
+    elif isinstance(entity, User):
+        try:
+            full = await client(functions.users.GetFullUserRequest(id=entity))
+            fu = getattr(full, "full_user", None)
+            if fu is not None:
+                about = getattr(fu, "about", None) or ""
+        except Exception:
+            pass
+    return {
+        "peer_id": pid,
+        "type": etype,
+        "title": title,
+        "username": getattr(entity, "username", None),
+        "members": members,
+        "about": about,
+    }
+
+
+async def join_target(username: str, target: str) -> Dict[str, Any]:
+    """Join a public channel/group or import an invite hash."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon import utils  # type: ignore
+    from telethon.tl import functions  # type: ignore
+
+    target = (target or "").strip()
+    invite_hash = None
+    # Detect invite links: t.me/+HASH, t.me/joinchat/HASH, or +HASH
+    m = re.search(r"(?:joinchat/|/\+|^\+)([\w-]+)", target)
+    if m:
+        invite_hash = m.group(1)
+
+    if invite_hash:
+        res = await client(functions.messages.ImportChatInviteRequest(hash=invite_hash))
+        chats = getattr(res, "chats", []) or []
+        pid = int(utils.get_peer_id(chats[0])) if chats else 0
+        return {"ok": True, "peer_id": pid}
+    else:
+        # username/public link
+        uname = re.sub(r"^https?://t\.me/", "", target).lstrip("@").strip("/")
+        entity = await client.get_entity(uname or target)
+        await client(functions.channels.JoinChannelRequest(channel=entity))
+        return {"ok": True, "peer_id": int(utils.get_peer_id(entity))}
+
+
+async def leave_target(username: str, peer_id: int) -> Dict[str, Any]:
+    """Leave a channel/group."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+    from telethon.tl.types import Channel, Chat  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    if isinstance(entity, Channel):
+        await client(functions.channels.LeaveChannelRequest(channel=entity))
+    elif isinstance(entity, Chat):
+        me = await client.get_me()
+        await client(
+            functions.messages.DeleteChatUserRequest(
+                chat_id=entity.id,
+                user_id=await client.get_input_entity(me),
+            )
+        )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Group 4 — Power messaging
+# ---------------------------------------------------------------------------
+
+async def get_scheduled(username: str, peer_id: int) -> Dict[str, Any]:
+    """Return scheduled messages for a peer."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    res = await client(functions.messages.GetScheduledHistoryRequest(peer=entity, hash=0))
+    out: List[Dict[str, Any]] = []
+    for m in getattr(res, "messages", []) or []:
+        try:
+            out.append(await _normalize_message(m, client))
+        except Exception as exc:
+            logger.debug("get_scheduled normalize error: %s", exc)
+    return {"messages": out}
+
+
+async def send_scheduled(username: str, peer_id: int, message_ids: List[int]) -> Dict[str, Any]:
+    """Send scheduled messages now."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    await client(
+        functions.messages.SendScheduledMessagesRequest(peer=entity, id=list(message_ids))
+    )
+    return {"ok": True}
+
+
+async def delete_scheduled(username: str, peer_id: int, message_ids: List[int]) -> Dict[str, Any]:
+    """Delete scheduled messages."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    await client(
+        functions.messages.DeleteScheduledMessagesRequest(peer=entity, id=list(message_ids))
+    )
+    return {"ok": True}
+
+
+async def get_reactions_list(username: str, peer_id: int, message_id: int) -> Dict[str, Any]:
+    """List who reacted to a message and with what emoji."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    res = await client(
+        functions.messages.GetMessageReactionsListRequest(
+            peer=entity, id=message_id, limit=100
+        )
+    )
+    users_by_id = {u.id: u for u in getattr(res, "users", []) or []}
+    out: List[Dict[str, Any]] = []
+    for r in getattr(res, "reactions", []) or []:
+        try:
+            peer = getattr(r, "peer_id", None)
+            uid = getattr(peer, "user_id", None) if peer is not None else None
+            u = users_by_id.get(uid)
+            name = ""
+            if u is not None:
+                fname = getattr(u, "first_name", None) or ""
+                lname = getattr(u, "last_name", None) or ""
+                name = (fname + " " + lname).strip() or getattr(u, "username", None) or str(u.id)
+            emo = getattr(r, "reaction", None)
+            emoji = getattr(emo, "emoticon", None) or "" if emo is not None else ""
+            out.append({"user": {"id": int(uid) if uid else 0, "name": name}, "emoji": emoji})
+        except Exception as exc:
+            logger.debug("get_reactions_list item error: %s", exc)
+    return {"reactions": out}
+
+
+async def get_read_by(username: str, peer_id: int, message_id: int) -> Dict[str, Any]:
+    """List users who have read a message (groups only)."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    out: List[Dict[str, Any]] = []
+    try:
+        entity = await client.get_entity(peer_id)
+        res = await client(
+            functions.messages.GetMessageReadParticipantsRequest(peer=entity, msg_id=message_id)
+        )
+        ids = []
+        for item in res or []:
+            uid = getattr(item, "user_id", None)
+            if uid is None and isinstance(item, int):
+                uid = item
+            if uid is not None:
+                ids.append(int(uid))
+        for uid in ids:
+            name = str(uid)
+            try:
+                u = await client.get_entity(uid)
+                fname = getattr(u, "first_name", None) or ""
+                lname = getattr(u, "last_name", None) or ""
+                name = (fname + " " + lname).strip() or getattr(u, "username", None) or str(uid)
+            except Exception:
+                pass
+            out.append({"id": uid, "name": name})
+    except Exception as exc:
+        logger.debug("get_read_by error: %s", exc)
+    return {"users": out}
+
+
+async def set_chat_ttl(username: str, peer_id: int, seconds: int) -> Dict[str, Any]:
+    """Set the auto-delete (TTL) period for a chat. 0 turns it off."""
+    slug = _slug(username)
+    client = await _get_client(slug)
+    from telethon.tl import functions  # type: ignore
+
+    entity = await client.get_entity(peer_id)
+    input_peer = await client.get_input_entity(entity)
+    await client(
+        functions.messages.SetHistoryTTLRequest(peer=input_peer, period=int(seconds))
+    )
+    return {"ok": True}

@@ -18,39 +18,82 @@ from src.auth_helpers import get_current_user
 from src.shadow_telegram_client import (
     TelegramNotAuthorizedError,
     TelegramNotConfiguredError,
+    add_members,
+    block_user,
     create_chat,
+    create_invite,
     delete_dialog,
+    delete_folder,
     delete_messages,
+    delete_profile_photo,
+    delete_scheduled,
     edit_message,
     forward_messages,
+    get_2fa_status,
     get_avatar,
+    get_blocked,
+    get_chat_permissions,
     get_contacts,
     get_dialogs,
+    get_folders,
+    get_gifs,
+    get_invites,
+    get_me_full,
     get_media,
+    get_members,
     get_messages,
     get_pinned,
+    get_privacy,
     get_profile,
+    get_reactions_list,
+    get_read_by,
+    get_scheduled,
+    get_sessions,
     get_shared_media,
     get_status,
+    get_sticker_bytes,
+    get_stickers,
     get_updates,
+    join_target,
+    leave_target,
     logout,
     mark_read,
     peer_status,
     pin_message,
+    promote_member,
     react,
+    remove_member,
+    reset_other_sessions,
+    reset_session,
+    resolve_target,
+    restrict_member,
+    revoke_invite,
     save_draft,
+    save_folder,
     search_dialogs,
     search_messages,
+    send_cached_doc,
     send_code,
     send_media,
     send_message,
+    send_poll,
+    send_scheduled,
+    set_2fa,
     set_archived,
+    set_chat_permissions,
+    set_chat_ttl,
     set_mute,
     set_pinned_dialog,
+    set_privacy,
+    set_profile_photo,
     set_typing,
     set_unread_mark,
+    unblock_user,
+    update_profile,
+    update_username,
     verify_code,
     verify_password,
+    vote_poll,
 )
 
 
@@ -75,6 +118,8 @@ class SendMessageRequest(BaseModel):
     peer_id: int
     text: str
     reply_to_id: Optional[int] = None
+    schedule_date: Optional[int] = None
+    quote: Optional[str] = None
 
 
 class MarkReadRequest(BaseModel):
@@ -154,6 +199,139 @@ class CreateChatRequest(BaseModel):
 class DraftRequest(BaseModel):
     peer_id: int
     text: str = ""
+
+
+# Wave 3 request models
+
+# Group 1 — Rich content & compose
+
+class SendStickerRequest(BaseModel):
+    peer_id: int
+    doc_id: str
+    reply_to_id: Optional[int] = None
+
+
+class SendGifRequest(BaseModel):
+    peer_id: int
+    doc_id: str
+    reply_to_id: Optional[int] = None
+
+
+class PollRequest(BaseModel):
+    peer_id: int
+    question: str
+    options: List[str]
+    multiple: bool = False
+    quiz: bool = False
+    correct: Optional[int] = None
+    public: bool = False
+
+
+class PollVoteRequest(BaseModel):
+    peer_id: int
+    message_id: int
+    options: List[int]
+
+
+# Group 2 — Settings & account
+
+class ProfileUpdateRequest(BaseModel):
+    first: Optional[str] = None
+    last: Optional[str] = None
+    bio: Optional[str] = None
+
+
+class UsernameRequest(BaseModel):
+    username: str
+
+
+class PrivacyRequest(BaseModel):
+    key: str
+    value: str
+
+
+class BlockRequest(BaseModel):
+    peer_id: int
+
+
+class TwoFaRequest(BaseModel):
+    password: str
+    hint: Optional[str] = None
+    email: Optional[str] = None
+    current: Optional[str] = None
+
+
+class FolderRequest(BaseModel):
+    id: Optional[int] = None
+    title: str
+    peer_ids: List[int] = []
+
+
+# Group 3 — Group & channel admin
+
+class MembersAddRequest(BaseModel):
+    peer_id: int
+    user_ids: List[int]
+
+
+class MemberRemoveRequest(BaseModel):
+    peer_id: int
+    user_id: int
+
+
+class MemberPromoteRequest(BaseModel):
+    peer_id: int
+    user_id: int
+    admin: bool
+    rank: Optional[str] = None
+
+
+class MemberRestrictRequest(BaseModel):
+    peer_id: int
+    user_id: int
+    banned: bool
+    until: Optional[int] = None
+
+
+class ChatPermissionsRequest(BaseModel):
+    peer_id: int
+    rights: dict
+
+
+class InviteCreateRequest(BaseModel):
+    peer_id: int
+    expire: Optional[int] = None
+    usage_limit: Optional[int] = None
+
+
+class InviteRevokeRequest(BaseModel):
+    peer_id: int
+    link: str
+
+
+class JoinRequest(BaseModel):
+    target: str
+
+
+class LeaveRequest(BaseModel):
+    peer_id: int
+
+
+# Group 4 — Power messaging
+
+class ScheduledSendRequest(BaseModel):
+    peer_id: int
+    message_ids: List[int]
+
+
+class ScheduledDeleteRequest(BaseModel):
+    peer_id: int
+    message_ids: List[int]
+
+
+class ChatTtlRequest(BaseModel):
+    peer_id: int
+    seconds: int
 
 
 # ---------------------------------------------------------------------------
@@ -277,12 +455,12 @@ def setup_telegram_routes() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.get("/dialogs")
-    async def dialogs(request: Request, limit: int = 50, folder: int = 0):
+    async def dialogs(request: Request, limit: int = 50, folder: int = 0, folder_id: int = 0):
         user = _require_user(request)
         limit = max(1, min(limit, 200))
         folder = folder if folder in (0, 1) else 0
         try:
-            items = await get_dialogs(user, limit=limit, folder=folder)
+            items = await get_dialogs(user, limit=limit, folder=folder, folder_id=folder_id)
             return {"dialogs": items}
         except TelegramNotConfiguredError:
             raise _not_configured_error()
@@ -301,11 +479,14 @@ def setup_telegram_routes() -> APIRouter:
         peer_id: int,
         limit: int = 50,
         before_id: int = 0,
+        around_id: int = 0,
     ):
         user = _require_user(request)
         limit = max(1, min(limit, 200))
         try:
-            msgs, has_more = await get_messages(user, peer_id, limit=limit, before_id=before_id)
+            msgs, has_more = await get_messages(
+                user, peer_id, limit=limit, before_id=before_id, around_id=around_id
+            )
             return {"messages": msgs, "has_more": has_more}
         except TelegramNotConfiguredError:
             raise _not_configured_error()
@@ -330,6 +511,8 @@ def setup_telegram_routes() -> APIRouter:
                 body.peer_id,
                 text,
                 reply_to_id=body.reply_to_id,
+                schedule_date=body.schedule_date,
+                quote=body.quote,
             )
             return {"ok": True, "message": msg}
         except TelegramNotConfiguredError:
@@ -536,6 +719,7 @@ def setup_telegram_routes() -> APIRouter:
         caption: str = Form(""),
         reply_to_id: str = Form(""),
         voice: str = Form("0"),
+        schedule_date: str = Form(""),
         files: List[UploadFile] = None,
     ):
         user = _require_user(request)
@@ -550,6 +734,13 @@ def setup_telegram_routes() -> APIRouter:
         if reply_to_id and reply_to_id.strip():
             try:
                 reply_to = int(reply_to_id.strip())
+            except ValueError:
+                pass
+
+        sched: Optional[int] = None
+        if schedule_date and schedule_date.strip():
+            try:
+                sched = int(schedule_date.strip())
             except ValueError:
                 pass
 
@@ -571,6 +762,7 @@ def setup_telegram_routes() -> APIRouter:
                 caption=caption or "",
                 reply_to=reply_to,
                 voice=is_voice,
+                schedule_date=sched,
             )
             return {"ok": True, "message": msg}
         except TelegramNotConfiguredError:
@@ -870,6 +1062,728 @@ def setup_telegram_routes() -> APIRouter:
         try:
             await save_draft(user, body.peer_id, body.text or "")
             return {"ok": True}
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ==================================================================
+    # Wave 3 — Group 1: Rich content & compose
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # 34. Stickers
+    # ------------------------------------------------------------------
+
+    @router.get("/stickers")
+    async def stickers(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_stickers(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 35. Serve a sticker/gif document
+    # ------------------------------------------------------------------
+
+    @router.get("/sticker/{doc_id}")
+    async def sticker(request: Request, doc_id: str):
+        user = _require_user(request)
+        try:
+            result = await get_sticker_bytes(user, doc_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail="Sticker not found")
+            data, content_type = result
+            return Response(
+                content=data,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        except HTTPException:
+            raise
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 36. GIFs
+    # ------------------------------------------------------------------
+
+    @router.get("/gifs")
+    async def gifs(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_gifs(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 37. Send sticker
+    # ------------------------------------------------------------------
+
+    @router.post("/send-sticker")
+    async def send_sticker(request: Request, body: SendStickerRequest):
+        user = _require_user(request)
+        try:
+            msg = await send_cached_doc(user, body.peer_id, body.doc_id, reply_to_id=body.reply_to_id)
+            return {"ok": True, "message": msg}
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 38. Send gif
+    # ------------------------------------------------------------------
+
+    @router.post("/send-gif")
+    async def send_gif(request: Request, body: SendGifRequest):
+        user = _require_user(request)
+        try:
+            msg = await send_cached_doc(user, body.peer_id, body.doc_id, reply_to_id=body.reply_to_id)
+            return {"ok": True, "message": msg}
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 39. Create poll
+    # ------------------------------------------------------------------
+
+    @router.post("/poll")
+    async def poll(request: Request, body: PollRequest):
+        user = _require_user(request)
+        question = (body.question or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="question is required")
+        options = [o for o in (body.options or []) if (o or "").strip()]
+        if len(options) < 2:
+            raise HTTPException(status_code=400, detail="at least two options are required")
+        try:
+            msg = await send_poll(
+                user,
+                body.peer_id,
+                question,
+                options,
+                multiple=body.multiple,
+                quiz=body.quiz,
+                correct=body.correct,
+                public=body.public,
+            )
+            return {"ok": True, "message": msg}
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 40. Vote in a poll
+    # ------------------------------------------------------------------
+
+    @router.post("/poll/vote")
+    async def poll_vote(request: Request, body: PollVoteRequest):
+        user = _require_user(request)
+        try:
+            msg = await vote_poll(user, body.peer_id, body.message_id, body.options)
+            return {"ok": True, "message": msg}
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ==================================================================
+    # Wave 3 — Group 2: Settings & account
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # 41. Me (full profile)
+    # ------------------------------------------------------------------
+
+    @router.get("/me")
+    async def me(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_me_full(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 42. Update profile
+    # ------------------------------------------------------------------
+
+    @router.post("/profile/update")
+    async def profile_update(request: Request, body: ProfileUpdateRequest):
+        user = _require_user(request)
+        try:
+            return await update_profile(user, first=body.first, last=body.last, bio=body.bio)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 43. Update username
+    # ------------------------------------------------------------------
+
+    @router.post("/profile/username")
+    async def profile_username(request: Request, body: UsernameRequest):
+        user = _require_user(request)
+        try:
+            return await update_username(user, body.username or "")
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 44. Set / delete profile photo
+    # ------------------------------------------------------------------
+
+    @router.post("/profile/photo")
+    async def profile_photo_set(request: Request, file: UploadFile = None):
+        user = _require_user(request)
+        if file is None:
+            raise HTTPException(status_code=400, detail="file is required")
+        data = await file.read()
+        fname = file.filename or "photo.jpg"
+        try:
+            return await set_profile_photo(user, fname, data)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.delete("/profile/photo")
+    async def profile_photo_delete(request: Request):
+        user = _require_user(request)
+        try:
+            return await delete_profile_photo(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 45. Privacy
+    # ------------------------------------------------------------------
+
+    @router.get("/privacy")
+    async def privacy_get(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_privacy(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/privacy")
+    async def privacy_set(request: Request, body: PrivacyRequest):
+        user = _require_user(request)
+        try:
+            return await set_privacy(user, body.key, body.value)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 46. Sessions
+    # ------------------------------------------------------------------
+
+    @router.get("/sessions")
+    async def sessions_get(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_sessions(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.delete("/sessions/{hash}")
+    async def sessions_delete(request: Request, hash: str):
+        user = _require_user(request)
+        try:
+            return await reset_session(user, hash)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/sessions/reset-others")
+    async def sessions_reset_others(request: Request):
+        user = _require_user(request)
+        try:
+            return await reset_other_sessions(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 47. Blocked users
+    # ------------------------------------------------------------------
+
+    @router.get("/blocked")
+    async def blocked_get(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_blocked(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/block")
+    async def block(request: Request, body: BlockRequest):
+        user = _require_user(request)
+        try:
+            return await block_user(user, body.peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/unblock")
+    async def unblock(request: Request, body: BlockRequest):
+        user = _require_user(request)
+        try:
+            return await unblock_user(user, body.peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 48. Two-step verification (2FA)
+    # ------------------------------------------------------------------
+
+    @router.get("/2fa/status")
+    async def twofa_status(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_2fa_status(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/2fa/set")
+    async def twofa_set(request: Request, body: TwoFaRequest):
+        user = _require_user(request)
+        if not body.password:
+            raise HTTPException(status_code=400, detail="password is required")
+        try:
+            return await set_2fa(
+                user,
+                body.password,
+                hint=body.hint,
+                email=body.email,
+                current=body.current,
+            )
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 49. Chat folders
+    # ------------------------------------------------------------------
+
+    @router.get("/folders")
+    async def folders_get(request: Request):
+        user = _require_user(request)
+        try:
+            return await get_folders(user)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/folders")
+    async def folders_save(request: Request, body: FolderRequest):
+        user = _require_user(request)
+        title = (body.title or "").strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="title is required")
+        try:
+            return await save_folder(user, title, body.peer_ids or [], folder_id=body.id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.delete("/folders/{folder_id}")
+    async def folders_delete(request: Request, folder_id: int):
+        user = _require_user(request)
+        try:
+            return await delete_folder(user, folder_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ==================================================================
+    # Wave 3 — Group 3: Group & channel admin
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # 50. Members list
+    # ------------------------------------------------------------------
+
+    @router.get("/members/{peer_id}")
+    async def members(request: Request, peer_id: int, limit: int = 100, offset: int = 0, q: str = ""):
+        user = _require_user(request)
+        limit = max(1, min(limit, 200))
+        try:
+            return await get_members(user, peer_id, limit=limit, offset=offset, q=(q or "").strip())
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 51. Add members
+    # ------------------------------------------------------------------
+
+    @router.post("/members/add")
+    async def members_add(request: Request, body: MembersAddRequest):
+        user = _require_user(request)
+        if not body.user_ids:
+            raise HTTPException(status_code=400, detail="user_ids is required")
+        try:
+            return await add_members(user, body.peer_id, body.user_ids)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 52. Remove member
+    # ------------------------------------------------------------------
+
+    @router.post("/members/remove")
+    async def members_remove(request: Request, body: MemberRemoveRequest):
+        user = _require_user(request)
+        try:
+            return await remove_member(user, body.peer_id, body.user_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 53. Promote member
+    # ------------------------------------------------------------------
+
+    @router.post("/members/promote")
+    async def members_promote(request: Request, body: MemberPromoteRequest):
+        user = _require_user(request)
+        try:
+            return await promote_member(
+                user, body.peer_id, body.user_id, body.admin, rank=body.rank or ""
+            )
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 54. Restrict member
+    # ------------------------------------------------------------------
+
+    @router.post("/members/restrict")
+    async def members_restrict(request: Request, body: MemberRestrictRequest):
+        user = _require_user(request)
+        try:
+            return await restrict_member(
+                user, body.peer_id, body.user_id, body.banned, until=body.until
+            )
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 55. Chat permissions
+    # ------------------------------------------------------------------
+
+    @router.get("/chat/permissions/{peer_id}")
+    async def chat_permissions_get(request: Request, peer_id: int):
+        user = _require_user(request)
+        try:
+            return await get_chat_permissions(user, peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/chat/permissions")
+    async def chat_permissions_set(request: Request, body: ChatPermissionsRequest):
+        user = _require_user(request)
+        try:
+            return await set_chat_permissions(user, body.peer_id, body.rights or {})
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 56. Invite links
+    # ------------------------------------------------------------------
+
+    @router.get("/invites/{peer_id}")
+    async def invites_get(request: Request, peer_id: int):
+        user = _require_user(request)
+        try:
+            return await get_invites(user, peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/invites")
+    async def invites_create(request: Request, body: InviteCreateRequest):
+        user = _require_user(request)
+        try:
+            return await create_invite(
+                user, body.peer_id, expire=body.expire, usage_limit=body.usage_limit
+            )
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/invites/revoke")
+    async def invites_revoke(request: Request, body: InviteRevokeRequest):
+        user = _require_user(request)
+        try:
+            return await revoke_invite(user, body.peer_id, body.link)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 57. Resolve / join / leave
+    # ------------------------------------------------------------------
+
+    @router.get("/resolve/{username_target}")
+    async def resolve(request: Request, username_target: str):
+        user = _require_user(request)
+        try:
+            return await resolve_target(user, username_target)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+    @router.post("/join")
+    async def join(request: Request, body: JoinRequest):
+        user = _require_user(request)
+        target = (body.target or "").strip()
+        if not target:
+            raise HTTPException(status_code=400, detail="target is required")
+        try:
+            return await join_target(user, target)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/leave")
+    async def leave(request: Request, body: LeaveRequest):
+        user = _require_user(request)
+        try:
+            return await leave_target(user, body.peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ==================================================================
+    # Wave 3 — Group 4: Power messaging
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # 58. Scheduled messages
+    # ------------------------------------------------------------------
+
+    @router.get("/scheduled/{peer_id}")
+    async def scheduled_get(request: Request, peer_id: int):
+        user = _require_user(request)
+        try:
+            return await get_scheduled(user, peer_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.post("/scheduled/send")
+    async def scheduled_send(request: Request, body: ScheduledSendRequest):
+        user = _require_user(request)
+        if not body.message_ids:
+            raise HTTPException(status_code=400, detail="message_ids is required")
+        try:
+            return await send_scheduled(user, body.peer_id, body.message_ids)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @router.delete("/scheduled")
+    async def scheduled_delete(request: Request, body: ScheduledDeleteRequest):
+        user = _require_user(request)
+        if not body.message_ids:
+            raise HTTPException(status_code=400, detail="message_ids is required")
+        try:
+            return await delete_scheduled(user, body.peer_id, body.message_ids)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 59. Reactions list
+    # ------------------------------------------------------------------
+
+    @router.get("/reactions/{peer_id}/{message_id}")
+    async def reactions(request: Request, peer_id: int, message_id: int):
+        user = _require_user(request)
+        try:
+            return await get_reactions_list(user, peer_id, message_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 60. Read-by
+    # ------------------------------------------------------------------
+
+    @router.get("/read-by/{peer_id}/{message_id}")
+    async def read_by(request: Request, peer_id: int, message_id: int):
+        user = _require_user(request)
+        try:
+            return await get_read_by(user, peer_id, message_id)
+        except TelegramNotConfiguredError:
+            raise _not_configured_error()
+        except TelegramNotAuthorizedError:
+            raise _not_authorized_error()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # 61. Chat TTL (auto-delete)
+    # ------------------------------------------------------------------
+
+    @router.post("/chat/ttl")
+    async def chat_ttl(request: Request, body: ChatTtlRequest):
+        user = _require_user(request)
+        try:
+            return await set_chat_ttl(user, body.peer_id, body.seconds)
         except TelegramNotConfiguredError:
             raise _not_configured_error()
         except TelegramNotAuthorizedError:
