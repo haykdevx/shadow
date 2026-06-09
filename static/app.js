@@ -209,6 +209,14 @@ function initializeEventListeners() {
   document.addEventListener('click', (e) => {
     if (e.target.closest('.icon-rail-btn, #sidebar .list-item, .section-header-flex')) {
       window.closeAllPopups();
+      // Telegram and Command are full-screen overlays. When the user clicks a
+      // different nav item, close the open overlay so the new page shows through
+      // — unless the click is opening that same overlay. This makes them switch
+      // like every other page instead of needing the X button.
+      const opensTelegram = e.target.closest('#tool-telegram-btn, #rail-telegram');
+      const opensCommand = e.target.closest('#tool-command-btn, #rail-command');
+      try { if (!opensTelegram) telegramModule?.closePage?.(); } catch (_) {}
+      try { if (!opensCommand) commandPageModule?.closePage?.(); } catch (_) {}
     }
   });
 
