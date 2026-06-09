@@ -93,7 +93,11 @@ function openPage(options = {}) {
   root = root || document.getElementById('telegram-app') || build();
   if (!iframe) iframe = root.querySelector('.tg-embed-frame');
   // Lazy-load the client on first open so we don't connect to Telegram until asked.
-  if (iframe && !iframe.getAttribute('src')) iframe.setAttribute('src', TWEB_SRC);
+  // Cache-bust index.html so a stale framed document (e.g. one cached with old
+  // X-Frame-Options) can never be reused; hashed assets still cache normally.
+  if (iframe && !iframe.getAttribute('src')) {
+    iframe.setAttribute('src', `${TWEB_SRC}?v=${Date.now()}`);
+  }
   root.hidden = false;
   document.body.classList.add('telegram-app-open');
   if (options.push !== false && window.location.pathname !== '/telegram') {

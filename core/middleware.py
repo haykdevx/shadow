@@ -70,8 +70,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "no-referrer"
 
         if is_tweb:
-            # Allow same-origin framing; no CSP so the client's WSS/wasm/workers work.
-            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            # Embedded, same-origin Telegram client: emit NO framing headers at all
+            # (no X-Frame-Options, no CSP) so our own SPA can frame it and the client
+            # can reach Telegram over WSS / run wasm / spawn blob workers. StaticFiles
+            # doesn't set these itself, so simply not adding them leaves them absent.
+            pass
         elif is_report:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
