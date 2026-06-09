@@ -24,6 +24,8 @@ try:
 except ImportError:  # Optional; Linux keeps its /proc fallback.
     psutil = None
 
+_SYS = platform.system()
+
 READ_ACTIONS = frozenset({
     "status",
     "processes",
@@ -284,8 +286,34 @@ def _processes(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _windows() -> dict[str, Any]:
-    if platform.system() != "Linux":
-        raise HomeAgentError("Window listing currently requires Linux with wmctrl")
+    if _SYS == "Darwin":
+        # AppleScript: visible app processes (one entry per app; macOS has no
+        # reliable per-window enumeration without accessibility scripting).
+        script = 'tell application "System Events" to get name of (every process whose visible is true)'
+        output = _run(["osascript", "-e", script], timeout=6)
+        names = [n.strip() for n in output.split(",") if n.strip()]
+        return {"ok": True, "windows": [{"id": "", "title": n, "class": n, "pid": "", "host": ""} for n in names]}
+    if _SYS == "Windows":
+        script = (
+            "Get-Process | Where-Object {$_.MainWindowTitle} | "
+            "Select-Object Id,ProcessName,MainWindowTitle | ConvertTo-Json -Compress"
+        )
+        raw = _powershell(script, timeout=8)
+        try:
+            data = json.loads(raw) if raw.strip() else []
+        except json.JSONDecodeError:
+            data = []
+        if isinstance(data, dict):
+            data = [data]
+        windows = [{
+            "id": str(row.get("Id", "")),
+            "pid": str(row.get("Id", "")),
+            "class": str(row.get("ProcessName", "")),
+            "title": str(row.get("MainWindowTitle", "")),
+            "host": "",
+        } for row in data]
+        return {"ok": True, "windows": windows}
+    # Linux
     output = _run(["wmctrl", "-lpx"], timeout=5)
     windows = []
     for line in output.splitlines():
@@ -534,21 +562,218 @@ def _mouse_coordinates(args: dict[str, Any]) -> tuple[int, int]:
     return x, y
 
 
+def _powershell(script: str, *, input_text: str | None = None, timeout: float = 12) -> str:
+    return _run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+        input_text=input_text,
+        timeout=timeout,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Keyboard / mouse — implemented per OS so the same action works everywhere.
+#   Linux : xdotool (X11) → ydotool (Wayland) fallback
+#   macOS : osascript (System Events) for keys; cliclick for the pointer
+#   Windows: PowerShell (SendKeys + user32 via Add-Type)
+# ---------------------------------------------------------------------------
+
+# AppleScript key codes for non-character keys.
+_MAC_KEYCODES = {
+    "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51, "backspace": 51,
+    "escape": 53, "esc": 53, "left": 123, "right": 124, "down": 125, "up": 126,
+    "home": 115, "end": 119, "pageup": 116, "pagedown": 121, "forwarddelete": 117,
+    "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97, "f7": 98,
+    "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+}
+_MAC_MODIFIERS = {
+    "ctrl": "control down", "control": "control down",
+    "alt": "option down", "opt": "option down", "option": "option down",
+    "cmd": "command down", "command": "command down", "super": "command down", "win": "command down",
+    "shift": "shift down",
+}
+# SendKeys named-key tokens for Windows.
+_WIN_KEYS = {
+    "return": "{ENTER}", "enter": "{ENTER}", "tab": "{TAB}", "space": " ",
+    "escape": "{ESC}", "esc": "{ESC}", "delete": "{DEL}", "backspace": "{BACKSPACE}",
+    "left": "{LEFT}", "right": "{RIGHT}", "up": "{UP}", "down": "{DOWN}",
+    "home": "{HOME}", "end": "{END}", "pageup": "{PGUP}", "pagedown": "{PGDN}",
+    "f1": "{F1}", "f2": "{F2}", "f3": "{F3}", "f4": "{F4}", "f5": "{F5}", "f6": "{F6}",
+    "f7": "{F7}", "f8": "{F8}", "f9": "{F9}", "f10": "{F10}", "f11": "{F11}", "f12": "{F12}",
+}
+_WIN_MODIFIERS = {"ctrl": "^", "control": "^", "alt": "%", "opt": "%", "option": "%",
+                  "shift": "+", "cmd": "^", "command": "^", "super": "^", "win": "^"}
+
+
+def _split_combo(combo: str) -> tuple[list[str], str]:
+    """Split 'ctrl+shift+c' → (['ctrl','shift'], 'c'). Accepts + or space separators."""
+    tokens = [t for t in combo.replace(" ", "+").split("+") if t]
+    if not tokens:
+        raise HomeAgentError("empty key combination")
+    return [t.lower() for t in tokens[:-1]], tokens[-1].lower()
+
+
+def _sendkeys_escape(text: str) -> str:
+    # Escape SendKeys metacharacters, then map newline/tab to their tokens.
+    out = []
+    for ch in text:
+        if ch in "+^%~(){}[]":
+            out.append("{" + ch + "}")
+        elif ch == "\n" or ch == "\r":
+            out.append("{ENTER}")
+        elif ch == "\t":
+            out.append("{TAB}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _type_text(text: str) -> dict[str, Any]:
+    if _SYS == "Darwin":
+        script = (
+            'on run argv\n'
+            'tell application "System Events" to keystroke (item 1 of argv)\n'
+            'end run'
+        )
+        _run(["osascript", "-e", script, text])
+    elif _SYS == "Windows":
+        # Send the (escaped) text to whatever window is focused.
+        _powershell(
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            "[System.Windows.Forms.SendKeys]::SendWait([Console]::In.ReadToEnd())",
+            input_text=_sendkeys_escape(text),
+        )
+    else:
+        _run_first([
+            ["xdotool", "type", "--clearmodifiers", "--", text],
+            ["ydotool", "type", "--", text],
+        ])
+    return {"ok": True}
+
+
+def _keypress(combo: str) -> dict[str, Any]:
+    mods, key = _split_combo(combo)
+    if _SYS == "Darwin":
+        using = ""
+        macmods = [_MAC_MODIFIERS[m] for m in mods if m in _MAC_MODIFIERS]
+        if macmods:
+            using = " using {%s}" % ", ".join(macmods)
+        if key in _MAC_KEYCODES:
+            _run(["osascript", "-e", f'tell application "System Events" to key code {_MAC_KEYCODES[key]}{using}'])
+        elif len(key) == 1:
+            script = (
+                'on run argv\n'
+                f'tell application "System Events" to keystroke (item 1 of argv){using}\n'
+                'end run'
+            )
+            _run(["osascript", "-e", script, key])
+        else:
+            raise HomeAgentError(f"Unsupported key: {key}")
+    elif _SYS == "Windows":
+        prefix = "".join(_WIN_MODIFIERS.get(m, "") for m in mods)
+        token = _WIN_KEYS.get(key, key if len(key) == 1 else None)
+        if token is None:
+            raise HomeAgentError(f"Unsupported key: {key}")
+        combo_sk = f"{prefix}{token}"
+        _powershell(
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            "[System.Windows.Forms.SendKeys]::SendWait([Console]::In.ReadToEnd())",
+            input_text=combo_sk,
+        )
+    else:
+        x11 = "+".join([*mods, key])
+        _run_first([
+            ["xdotool", "key", "--clearmodifiers", x11],
+            ["ydotool", "key", x11],
+        ])
+    return {"ok": True}
+
+
 def _mouse_move(args: dict[str, Any]) -> dict[str, Any]:
     x, y = _mouse_coordinates(args)
-    _run(["xdotool", "mousemove", str(x), str(y)])
+    if _SYS == "Darwin":
+        if shutil.which("cliclick") is None:
+            raise HomeAgentError("Install cliclick (brew install cliclick) for pointer control on macOS")
+        _run(["cliclick", f"m:{x},{y}"])
+    elif _SYS == "Windows":
+        _powershell(
+            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);' "
+            f"-Name M -Namespace W;[W.M]::SetCursorPos({x},{y})"
+        )
+    else:
+        _run_first([["xdotool", "mousemove", str(x), str(y)], ["ydotool", "mousemove", "-a", str(x), str(y)]])
     return {"ok": True, "x": x, "y": y}
 
 
 def _mouse_click(args: dict[str, Any]) -> dict[str, Any]:
-    button = max(1, min(int(args.get("button", 1)), 5))
-    if args.get("x") is not None and args.get("y") is not None:
+    button = max(1, min(int(args.get("button", 1)), 3))
+    has_xy = args.get("x") is not None and args.get("y") is not None
+    x = y = None
+    if has_xy:
         x, y = _mouse_coordinates(args)
-        _run(["xdotool", "mousemove", str(x), str(y)])
+    if _SYS == "Darwin":
+        if shutil.which("cliclick") is None:
+            raise HomeAgentError("Install cliclick (brew install cliclick) for pointer control on macOS")
+        verb = {1: "c", 2: "rc", 3: "rc"}.get(button, "c")  # cliclick: c=left, rc=right
+        target = f"{verb}:{x},{y}" if has_xy else f"{verb}:."
+        _run(["cliclick", target])
+    elif _SYS == "Windows":
+        down, up = {1: (0x0002, 0x0004), 2: (0x0008, 0x0010), 3: (0x0008, 0x0010)}.get(button, (0x0002, 0x0004))
+        move = f"[W.M]::SetCursorPos({x},{y});" if has_xy else ""
+        _powershell(
+            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);"
+            "[DllImport(\"user32.dll\")]public static extern void mouse_event(int f,int dx,int dy,int d,int e);' "
+            f"-Name M -Namespace W;{move}[W.M]::mouse_event({down},0,0,0,0);[W.M]::mouse_event({up},0,0,0,0)"
+        )
     else:
-        x = y = None
-    _run(["xdotool", "click", str(button)])
+        if has_xy:
+            _run_first([["xdotool", "mousemove", str(x), str(y)], ["ydotool", "mousemove", "-a", str(x), str(y)]])
+        _run_first([["xdotool", "click", str(button)], ["ydotool", "click", str({1: "0xC0", 2: "0xC2", 3: "0xC1"}.get(button, "0xC0"))]])
     return {"ok": True, "button": button, "x": x, "y": y}
+
+
+def _media(command: str) -> dict[str, Any]:
+    if _SYS == "Darwin":
+        verb = {"play": "play", "pause": "pause", "play-pause": "playpause",
+                "next": "next track", "previous": "previous track", "stop": "pause"}[command]
+        # Control whichever common player is running; ignore the ones that aren't.
+        ran = False
+        for app in ("Spotify", "Music"):
+            try:
+                _run(["osascript", "-e", f'if application "{app}" is running then tell application "{app}" to {verb}'])
+                ran = True
+            except HomeAgentError:
+                continue
+        if not ran:
+            raise HomeAgentError("No supported media app (Spotify/Music) is running")
+    elif _SYS == "Windows":
+        vk = {"play": 0xB3, "pause": 0xB3, "play-pause": 0xB3, "next": 0xB0,
+              "previous": 0xB1, "stop": 0xB2}[command]
+        _powershell(
+            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")]public static extern void keybd_event(byte k,byte s,int f,int e);' "
+            f"-Name K -Namespace W;[W.K]::keybd_event({vk},0,0,0);[W.K]::keybd_event({vk},0,2,0)"
+        )
+    else:
+        _run(["playerctl", "play-pause" if command == "play-pause" else command])
+    return {"ok": True, "command": command}
+
+
+def _volume(percent: int) -> dict[str, Any]:
+    if _SYS == "Darwin":
+        value = max(0, min(percent, 100))
+        _run(["osascript", "-e", f"set volume output volume {value}"])
+        return {"ok": True, "percent": value}
+    if _SYS == "Windows":
+        value = max(0, min(percent, 100))
+        if shutil.which("nircmd") or shutil.which("nircmd.exe"):
+            _run(["nircmd.exe", "setsysvolume", str(round(value / 100 * 65535))])
+            return {"ok": True, "percent": value}
+        raise HomeAgentError("Absolute volume on Windows needs nircmd (nircmd.exe) on PATH")
+    value = max(0, min(percent, 150))
+    _run_first([
+        ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{value}%"],
+        ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{value}%"],
+    ])
+    return {"ok": True, "percent": value}
 
 
 def execute_action(action: str, args: Any = None, *, confirmed: bool = False) -> dict[str, Any]:
@@ -614,14 +839,12 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
             _run_first([["systemctl", "poweroff"], ["loginctl", "poweroff"]])
         return {"ok": True}
     if action == "type_text":
-        _run(["xdotool", "type", "--clearmodifiers", "--", _need_text(args, "text")])
-        return {"ok": True}
+        return _type_text(_need_text(args, "text"))
     if action == "keypress":
         key = _need_text(args, "key", limit=80)
         if not all(ch.isalnum() or ch in "+_- " for ch in key):
             raise HomeAgentError("keypress contains unsupported characters")
-        _run(["xdotool", "key", "--clearmodifiers", key])
-        return {"ok": True}
+        return _keypress(key)
     if action == "mouse_move":
         return _mouse_move(args)
     if action == "mouse_click":
@@ -630,15 +853,9 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         command = _need_text(args, "command", limit=20).lower()
         if command not in {"play", "pause", "play-pause", "next", "previous", "stop"}:
             raise HomeAgentError("media command must be play, pause, play-pause, next, previous, or stop")
-        _run(["playerctl", command])
-        return {"ok": True}
+        return _media(command)
     if action == "volume":
-        value = max(0, min(int(args.get("percent", 50)), 150))
-        _run_first([
-            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{value}%"],
-            ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{value}%"],
-        ])
-        return {"ok": True, "percent": value}
+        return _volume(int(args.get("percent", 50)))
     if action == "app_launch":
         app = _need_text(args, "app", limit=60).lower()
         argv = _parse_apps().get(app)
@@ -647,6 +864,22 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, start_new_session=True)
         return {"ok": True, "app": app}
     if action in {"app_focus", "app_close"}:
+        if _SYS == "Darwin":
+            name = _need_text(args, "title", limit=120)
+            verb = "activate" if action == "app_focus" else "quit"
+            _run(["osascript", "-e", f'tell application "{name}" to {verb}'])
+            return {"ok": True, "title": name}
+        if _SYS == "Windows":
+            name = _need_text(args, "title", limit=120)
+            if action == "app_focus":
+                safe = name.replace("'", "''")
+                _powershell(f"(New-Object -ComObject WScript.Shell).AppActivate('{safe}')")
+            else:
+                proc = str(args.get("class") or name).replace(".exe", "")
+                safe = proc.replace("'", "''")
+                _powershell(f"Get-Process -Name '{safe}' -ErrorAction SilentlyContinue | Stop-Process")
+            return {"ok": True, "title": name}
+        # Linux / X11 (wmctrl)
         wid = str(args.get("id") or "").strip()
         if wid.startswith("0x") and all(ch in "0123456789abcdefABCDEFx" for ch in wid):
             _run(["wmctrl", "-ia" if action == "app_focus" else "-ic", wid])

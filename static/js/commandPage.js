@@ -144,7 +144,7 @@ function buildShell() {
           <button type="button" class="command-btn" data-command-action="ai-panel">+ Add panel (AI)</button>
           <button type="button" class="command-btn" data-command-action="refresh">Refresh all</button>
           <button type="button" class="command-btn danger" data-command-action="lock">Lock PC</button>
-          <button type="button" class="command-close" data-command-action="close" aria-label="Close Command">x</button>
+          <button type="button" class="command-close" data-command-action="close" aria-label="Close Command">✕</button>
         </div>
       </header>
 
