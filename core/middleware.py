@@ -60,11 +60,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_tool_render = path.startswith("/api/tools/") and path.endswith("/render")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
+        # Embedded Telegram Web client (self-hosted at /static/tweb/): rendered in a
+        # same-origin iframe and must reach Telegram's servers over WSS, compile wasm
+        # (rlottie/opus) and spawn blob workers. Skip the restrictive framing/CSP
+        # headers for it — the bundle is our own trusted build.
+        is_tweb = path.startswith("/static/tweb/")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
 
-        if is_report:
+        if is_tweb:
+            # Allow same-origin framing; no CSP so the client's WSS/wasm/workers work.
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        elif is_report:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
