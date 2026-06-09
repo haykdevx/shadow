@@ -149,8 +149,8 @@ function buildShell() {
       </header>
 
       <div class="command-grid">
-        ${panel('access', 'Your Devices', 'private to this Shadow account', true)}
-        ${panel('vitals', 'Host / Vitals', 'live telemetry')}
+        ${panel('access', 'Your Devices', 'private to this Shadow account', { wide: true, open: true })}
+        ${panel('vitals', 'Host / Vitals', 'live telemetry', { open: true })}
         ${panel('screen', 'Screen', 'live-ish capture')}
         ${panel('processes', 'Processes', 'top CPU/RAM')}
         ${panel('windows', 'Apps / Windows', 'focus, close, launch')}
@@ -177,16 +177,19 @@ function buildShell() {
   return node;
 }
 
-function panel(id, title, sub, wide = false) {
+function panel(id, title, sub, opts = {}) {
+  // Back-compat: a bare `true` used to mean "wide".
+  const { wide = false, open = false } = (opts === true ? { wide: true } : opts) || {};
   return `
-    <section class="command-panel${wide ? ' command-panel-wide' : ''}" data-command-panel="${esc(id)}">
-      <div class="command-panel-head">
+    <section class="command-panel${wide ? ' command-panel-wide' : ''}${open ? '' : ' collapsed'}" data-command-panel="${esc(id)}">
+      <button type="button" class="command-panel-head" data-panel-toggle="${esc(id)}" aria-expanded="${open ? 'true' : 'false'}">
         <div>
           <div class="command-panel-title">${esc(title)}</div>
           <div class="command-panel-sub">${esc(sub)}</div>
         </div>
+        <span class="command-panel-chevron" aria-hidden="true">▾</span>
         <span class="command-panel-dot" data-panel-state="${esc(id)}"></span>
-      </div>
+      </button>
       <div class="command-panel-note" data-panel-note="${esc(id)}" hidden></div>
       <div class="command-panel-body" data-panel-body="${esc(id)}">
         <div class="command-loading">Loading...</div>
@@ -1068,6 +1071,16 @@ function bindEvents() {
   root.addEventListener('click', async (event) => {
     const target = event.target.closest('button, .command-file, .command-chip, label');
     if (!target) return;
+
+    const toggleId = target.dataset.panelToggle;
+    if (toggleId) {
+      const section = target.closest('.command-panel');
+      if (section) {
+        const collapsed = section.classList.toggle('collapsed');
+        target.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      }
+      return;
+    }
 
     const accessAction = target.dataset.accessAction;
     if (target.dataset.deviceEnroll !== undefined) return createDeviceEnrollment();

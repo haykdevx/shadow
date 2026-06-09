@@ -113,9 +113,54 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
   padding: 10px 13px;
+  border: 0;
   border-bottom: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.24);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-panel-head > div {
+  min-width: 0;
+}
+
+.command-panel-head:hover {
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.command-panel-head:focus-visible {
+  outline: 2px solid var(--brand-color, var(--red));
+  outline-offset: -2px;
+}
+
+.command-panel-chevron {
+  margin-left: auto;
+  color: var(--fg-muted, var(--color-subheader));
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+/* Collapsed: only the header shows; click to expand. Keeps the page short. */
+.command-panel.collapsed {
+  min-height: 0;
+}
+
+.command-panel.collapsed .command-panel-head {
+  border-bottom: 0;
+}
+
+.command-panel.collapsed .command-panel-chevron {
+  transform: rotate(-90deg);
+}
+
+.command-panel.collapsed .command-panel-body,
+.command-panel.collapsed .command-panel-note {
+  display: none;
 }
 
 .command-panel-sub,
