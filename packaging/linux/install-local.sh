@@ -7,7 +7,7 @@ APP_ID="io.github.haykdevx.shadow"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 ASSETS="$REPO/desktop/assets"
-RUN="$REPO/desktop/run.sh"
+RUN="$REPO/run.sh"
 
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"

@@ -1,34 +1,6 @@
 #!/usr/bin/env bash
-# Shadow Desktop — Linux / macOS launcher.
-# Creates an isolated venv for the pywebview shell and starts the app.
-# The app itself runs in Docker; this script only needs Python 3 + Docker.
-set -euo pipefail
-
+# Backward-compatible alias. The canonical entry point is the repo-root
+# ./run.sh, which does one-time setup (webview backend + dock entry) then
+# launches. This just forwards to it.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$HERE/.venv-desktop"
-PY="${PYTHON:-python3}"
-
-if ! command -v "$PY" >/dev/null 2>&1; then
-  echo "Python 3 is required (set \$PYTHON to override)." >&2
-  exit 1
-fi
-
-if [ ! -d "$VENV" ]; then
-  echo "[shadow-desktop] creating launcher venv…"
-  # On Linux, pywebview's GTK backend uses the system 'gi' (PyGObject) module,
-  # which is installed system-wide via apt and is not pip-installable into an
-  # isolated venv — so expose system packages there. Harmless on macOS.
-  VENV_FLAGS=""
-  if [ "$(uname -s)" = "Linux" ]; then
-    VENV_FLAGS="--system-site-packages"
-  fi
-  "$PY" -m venv $VENV_FLAGS "$VENV"
-  "$VENV/bin/pip" install --quiet --upgrade pip
-  "$VENV/bin/pip" install --quiet -r "$HERE/requirements-desktop.txt"
-fi
-
-# Linux note: pywebview needs a system webview backend. If the window fails to
-# open, install one of:
-#   Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1 libgtk-3-0
-#   (or) pip install 'pywebview[qt]'   with PyQt/PySide present
-exec "$VENV/bin/python" "$HERE/launcher.py" "$@"
+exec "$HERE/../run.sh" "$@"

@@ -33,26 +33,33 @@ ntfy are intentionally left out of the desktop default (opt in via
   `pip install 'pywebview[qt]'` with PyQt/PySide present.
   (Windows uses the built-in Edge WebView2; macOS uses WKWebView.)
 
-## Run it
+## Run it — one command, then pin it
 
 ```bash
-# Linux / macOS
-./desktop/run.sh
+# Linux / macOS — from the repo root
+./run.sh
 
 # Windows (PowerShell)
 ./desktop/run.ps1
 ```
 
-First launch builds the Shadow image (a few minutes) and then opens the window.
-Subsequent launches are fast. Create your local account on first load.
+The **first** `./run.sh` does a one-time setup with no further commands:
+- creates an isolated launcher environment + a webview backend (prefers system
+  GTK; falls back to a sudo-free Qt backend),
+- installs a **Shadow** entry into your app menu,
+- builds the Shadow image (a few minutes) and opens the window.
+
+After that, **search "Shadow" in your app menu, pin it to your dock, and just
+tap to start** — no terminal, no commands. Create your local account on first
+load. (`./desktop/run.sh` still works; it forwards to `./run.sh`.)
 
 ### Useful flags
 
 | Command | Effect |
 |---|---|
-| `./desktop/run.sh --check` | Validate Docker + compose wiring, then exit (no containers started). |
-| `./desktop/run.sh --headless` | Start the stack and wait for health without opening a window (servers / testing). |
-| `./desktop/run.sh --stop` | Stop the parity services and exit. |
+| `./run.sh --check` | Validate Docker + compose wiring, then exit (no containers started). |
+| `./run.sh --headless` | Start the stack and wait for health without opening a window (servers / testing). |
+| `./run.sh --stop` | Stop the parity services and exit. |
 
 ## Configuration (environment)
 
