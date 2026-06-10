@@ -172,58 +172,86 @@ def wait_for_health(timeout: int, on_status=None) -> bool:
 # --------------------------------------------------------------------------- #
 # The Shadow serpent emblem (96px PNG), embedded so the splash needs no assets.
 EMBLEM_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABYlBMVEUHCAoHCAkGBwkGBggEBAUEBQYAAAABAQECAgIDAwMEBAQFBQUICAkVFh"
-    "g6PEISEhMaGxwNDg8lJikMDAxYWFhnZmdkZGREREQVFRUTExOCgoKYmJjo6Ojs7O2wsLCBgYJ5eHkgICAqKiuoqKh+fX4dHR0BAAEuLi7X19gs"
-    "LCwPDw8KCgohISFlZWUrKysICAgQEBB+fn7x8fL7+/zn5+jt7e7l5ebx8fGGhYaRkZGEhIVaWlqIiIhTU1MtLS05OTmEhIT///+Pj5CAgICQj5"
-    "B3d3eBgYG7u7yysrPDw8Svr7AnJyd3d3jc3N18fHzCwsPS0tLT09S9vb2ioqOJiYnp6enBwMHGxsYWFhYtLS5KSUo3NjdpaWqOjo5mZmbw8PHh"
-    "4eKHh4hgYGB9fX1/f4C5ubk1NDURERFGRkaOjY7Hx8j09PSmpqdZWVk+Pj5KSkpAQEAeHh5ubW4cHBwLCwsODg4Vs/qwAAAC4klEQVRo3u2Z51"
-    "fUQBDAz4Pb2c3ZEbFwWBAbKiLYCyAoxd4VFXvv7f83JBdMQmZms8V7T2/euw/3bjO/adnbnalU2tIWR7KiUnUsocqMVF2bXM1/7eisOZTOjhyh"
-    "WqkJp1L7HwEgpVJBKEopCY4BIFUQam2qheirAlcAKLYYQgg4AIR6UDXhb9ISAIGiYx0geE2AYtTja7QAMmCLJfayIE46AB3z0ZUaADR/BSKD0g"
-    "Coa4XnT5hyyzkABCW0xw5nCQygvP48gQHUy+sPCfoAvfLMS8ZtEqBK1E9a0rVEAaR2/eclZRkFMEjw8kcJgFkCYoEl53GASYWmgpRYhwM4/Yx/"
-    "yeMoAPgM11dSAMkAuAysWi3WrKUcVDSAdWDdemZBMwsYQFmUUMYFDMCXEGsBCdBIMStxEBCAfYQSIxGA1UuWiRHmAfdweDxlt9oAB7hIQTPOxQ"
-    "BJWweia0P3xp5NnJcSBXA53rxla2+jbxsDAFMAiO07xM7+XQNC7SbXKRxAei727N23f/DAwUNDzNuGA+gqPTx8ZKQxevTY8d4Tg+TCwAigxMlT"
-    "A92nz5w9NzY+cV5ID4DJkakLF6dnZucuXb5C+moGEKLr6rXrN27eun3nbs89wxAx79n9B/MPw9j0P3q8QIaIqCKiOkAMN0afPO1bePb8xUvSDj"
-    "ADiKFXr9+8ffd+4sPHT3SZEgB6q/j85ev8NzH2/YegdxRiq2A2u5+/ILKd2U+JzY4uI4g+kv1TIrbrv/CHY3hwzzhKAbz/6buIUawCPXhZx4g5"
-    "eNkd3iMH6KOj1fUjFSEcYH5BiyV5S8wvIBxAcADvVyi7S+CSda28xvq/iJdqRaUlbVlrmyGG7ZzMQ61uSHlvqRV0+WhZ1kNsfVtT+G/M+m8tL4"
-    "ZJI9cWzXGh0d5Xdu39CEEOKLDfyo1YCmcprkYsTWXR6Ck1JFIOh0QJZFFrPOaSzsdc5eVfBHge93ofWPsfubelLebyG8sftbVFcVtaAAAAAElF"
-    "TkSuQmCC"
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAB+FBMVEUAAAABAQECAgIDAwMEBAQFBQUEAwQUFRULCwsaGx1KTFMCAwMZGRoNDg"
+    "4MDQ4kJSgDAgM+Pj5+fn6KioqOjY5paGlBQEEPDw8GBQZaWlqPj5ChoaHg4OHk5OWwsLCpqalFRUVNTU1dXV0IBwheXl/BwcKXl5dVVFUUFBSs"
+    "rKxGRkYEAwMsLCxsbGxDQkPf3+C8vLxycnJra2ttbG13d3eQkJCTk5N6entUVFQaGhpHRke6urrr6+zu7u/p6ero6Onj4+PW1tbV1dbk5OTq6u"
+    "u9vL1AP0AKCgqrq6uBgYEjIyNOTU5XVldSUlKFhIUtLS1BQUGMjIzn5+i8vL0ZGRkJCQmpqKnd3d5paWlpaWp8fH2xsbKfn6CsrK2rq6x/f4An"
+    "JyeHh4g5OTpAQEC7u7zi4uPl5eXe3t7Pz9DCwsPX19jw8PGGhoY3NzcTExM4ODhJSUpsa2xLS0wwMDAcHBwQDxCCgoOvr68mJiZtbW2IiIiDg4"
+    "SZmZlJSUkXFxdwcHCWlpdLSkulpaUfHx+3t7jT09TLy8zZ2dnk4+TJycmbm5uenp6Af4CcnJ1UVFUrKysWFhYqKipaWlvCwsLx8fLKysqTk5Q3"
+    "NzgQEBBnZ2dHR0c7OztMTExTUlMeHh6UlJQREREICAgiIiInJygbGhsGBgYCAQIFBAX80R9uAAADBUlEQVRo3u1aZ1cUQRCcnd1FzOCZRT0QFS"
+    "MmFBMoYhYxZzFnBbOCopgxY8458Dfd9bzHxtuamZ4Pvkd/u7c7Vd3VPeF6lrFu+3/MMDg3/xrnhkEMzk3Lslxk1wyHx/1JRuKgmzwqIBISHgXu"
+    "eWpxHCsaPsFHwwlPGt7E3DNtOQqORw964jcrTyhY0XRzS3CAIRaEKaGqSLLlao9bcLSS0wccKI0PDlXAdyx5sBo+wKCI7ziYgK+2diUymMr47u"
+    "qe4xlaybIqkODnyKNqgrMWlwYagVyLSSUZfgyUzAoaZ5GVRBgAY3ZEAOAUcAqhR37iWxFygAH07NWb9emb/F4IjoMZ6Ncfq+WQIFRzIGvBuZC0"
+    "CIpbwGOzgJqA+zWiViikCblCAUi0hkTMV0d0fyZinNagkD8JAgR4rB5QdBbYhQNSAwcNHgISdPliYDkeOmz4iKKRo0anMQJPYsEiKi4ZY5eOHT"
+    "e+DCToKiMOLdVlEyYyNmnylEKwpj2o2F4wtXza9BkzZ1XMnlM5F3nfIzxEMC81f8HCqupFi2uW1C5dhkQgRrB8xcpVq9fUrS2ur1+3fsPGTeQE"
+    "m7dsTW3bvmPnrt0Ne/buK9pPTsAOHDxUVX34yNFjx0+cTNecEiOApmdj0+kzZ8+dv5Auv1hyqVGIACrTy80tV662XuP519tu3GwFBnhQkYl26/"
+    "adu/fa2+8/ePio8vETxCOP8MhS0dTwtOPZ84oXtS9fvX4DSeoRHlns3r57/+Hjp88ddV9KvyLw/m0YWU2/ff/x85frGAbvB6Xf8wOyUPw3C9pv"
+    "b6jaN33txxb9B68C8iQEVNd++NV+fCevo3Dhd9IShCWnnWtRGwBpmqPAsMORfAD6WwmEhRTXMSJr58R6StWQin2ivaXG8gjSkDuV6m3NJBVszY"
+    "1Z5XUbaV6r4COnXN3tff0XFEz7FQvTf0mk/5pL2CFTovZ4J0whddXojsMouNJ9rNbr3ox7FjdyPlWC/+djZBzcJLzXz340YGQ+G8h8NEB9Xtb6"
+    "2UO36bQ/gtlC3GQe87EAAAAASUVORK5CYII="
 )
 
 
-def _page(title_en: str, title_jp: str, detail: str, spinner: bool) -> str:
-    spin = (
-        '<div class="spin"></div>' if spinner else '<div class="err">!</div>'
-    )
+def _splash_html() -> str:
+    # Mojang-style intro: pure black, the SHADOW wordmark revealing letter by
+    # letter in white, then a quiet tagline and an indeterminate loading bar.
+    letters = "".join(f"<span>{c}</span>" for c in "SHADOW")
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <style>
-  html,body{{margin:0;height:100%;background:#07080a;color:#e8d8b0;
-    font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;}}
-  .wrap{{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;}}
-  .emblem{{width:88px;height:88px;image-rendering:auto;
-    filter:drop-shadow(0 0 14px rgba(255,176,0,.28));}}
-  .mark{{color:#ffb000;letter-spacing:.32em;font-size:12px;}}
-  .en{{font-size:22px;font-weight:800;letter-spacing:.18em;color:#ffb000;}}
-  .jp{{font-size:13px;opacity:.8;color:#ffb000;}}
-  .detail{{font-size:12px;color:#8a7c5f;min-height:16px;text-align:center;padding:0 24px;}}
-  .spin{{width:34px;height:34px;border:3px solid #2a2118;border-top-color:#ffb000;border-radius:50%;
-    animation:spin 1s linear infinite;}}
-  .err{{width:34px;height:34px;border:3px solid #ff3b3b;border-radius:50%;color:#ff3b3b;
-    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;}}
-  @keyframes spin{{to{{transform:rotate(360deg)}}}}
+  html,body{{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}}
+  .wrap{{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;}}
+  .emblem{{width:60px;height:60px;margin-bottom:28px;opacity:0;
+    filter:grayscale(1) brightness(1.7);animation:fade 1s ease .1s forwards;}}
+  .word{{display:flex;gap:.34em;font-weight:800;font-size:54px;line-height:1;letter-spacing:.06em;}}
+  .word span{{opacity:0;transform:translateY(12px);
+    animation:rise .55s cubic-bezier(.2,.7,.2,1) forwards;}}
+  .word span:nth-child(1){{animation-delay:.25s}}
+  .word span:nth-child(2){{animation-delay:.40s}}
+  .word span:nth-child(3){{animation-delay:.55s}}
+  .word span:nth-child(4){{animation-delay:.70s}}
+  .word span:nth-child(5){{animation-delay:.85s}}
+  .word span:nth-child(6){{animation-delay:1.00s}}
+  .tag{{margin-top:22px;color:#9a9a9a;font-size:13px;letter-spacing:.12em;
+    text-align:center;padding:0 24px;opacity:0;animation:fade 1.2s ease 1.3s forwards;}}
+  .bar{{margin-top:30px;width:240px;height:2px;background:#161616;overflow:hidden;
+    opacity:0;animation:fade .6s ease 1.5s forwards;}}
+  .bar i{{display:block;height:100%;width:38%;background:#fff;
+    animation:slide 1.25s ease-in-out infinite;}}
+  @keyframes rise{{to{{opacity:1;transform:none}}}}
+  @keyframes fade{{to{{opacity:1}}}}
+  @keyframes slide{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(360%)}}}}
+  @media (prefers-reduced-motion: reduce){{
+    .emblem,.word span,.tag,.bar{{animation:none;opacity:1;transform:none;}}
+    .bar i{{animation:none;width:100%;}}
+  }}
 </style></head><body><div class="wrap">
-  <img class="emblem" alt="Shadow" src="data:image/png;base64,{EMBLEM_B64}">
-  <div class="mark">SHADOW</div>{spin}
-  <div class="en">{title_en}</div><div class="jp">{title_jp}</div>
-  <div class="detail" id="detail">{detail}</div>
+  <img class="emblem" alt="" src="data:image/png;base64,{EMBLEM_B64}">
+  <div class="word">{letters}</div>
+  <div class="tag" id="detail">i know where you live</div>
+  <div class="bar"><i></i></div>
 </div></body></html>"""
 
 
-SPLASH_HTML = _page("STARTING", "起動中", "Bringing up the Shadow stack…", spinner=True)
+SPLASH_HTML = _splash_html()
 
 
 def error_html(message: str) -> str:
     safe = message.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-    return _page("MALFUNCTION", "停止", safe, spinner=False)
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<style>
+  html,body{{margin:0;height:100%;background:#000;color:#fff;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}}
+  .wrap{{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:0 28px;text-align:center;}}
+  .x{{width:30px;height:30px;border:2px solid #ff3b3b;border-radius:50%;color:#ff3b3b;
+    display:flex;align-items:center;justify-content:center;font-weight:800;}}
+  .t{{font-size:20px;font-weight:800;letter-spacing:.2em;}}
+  .m{{font-size:12px;color:#9a9a9a;line-height:1.55;max-width:560px;}}
+</style></head><body><div class="wrap">
+  <div class="x">!</div><div class="t">MALFUNCTION</div>
+  <div class="m">{safe}</div>
+</div></body></html>"""
 
 
 # --------------------------------------------------------------------------- #
@@ -243,18 +271,12 @@ def run_gui(base: list[str]) -> int:
     )
 
     def worker() -> None:
-        def set_detail(text: str) -> None:
-            esc = text.replace("'", "\\'")
-            try:
-                window.evaluate_js(f"document.getElementById('detail').innerText='{esc}'")
-            except Exception:
-                pass
         try:
             ensure_env()
-            set_detail("Starting containers…")
             start_stack(base)
-            set_detail("Waiting for the app to come up…")
-            if not wait_for_health(START_TIMEOUT, on_status=set_detail):
+            # The splash tagline stays put ("i know where you live"); the
+            # animated bar conveys progress through the first-run build.
+            if not wait_for_health(START_TIMEOUT):
                 window.load_html(error_html(
                     f"Shadow did not become healthy within {START_TIMEOUT}s.\n"
                     f"Check container logs:  docker compose logs shadow"
