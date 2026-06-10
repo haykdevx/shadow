@@ -98,9 +98,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # Migrating to nonce-only requires templating the HTML files +
             # auditing every JS-set style attribute. Since inline styles
             # don't execute script, the residual risk is visual-only.
+            #
+            # The native desktop app (pywebview/WebKitGTK) needs 'unsafe-eval'
+            # for its JS<->Python bridge (window.pywebview.api). Grant it ONLY to
+            # that client, identified by its custom User-Agent token; ordinary
+            # web browsers keep the strict, eval-free policy.
+            script_extra = ""
+            if "ShadowDesktop" in request.headers.get("user-agent", ""):
+                script_extra = " 'unsafe-eval'"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+                f"script-src 'self' 'nonce-{nonce}'{script_extra} https://cdn.jsdelivr.net; "
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
                 "font-src 'self' https://cdn.jsdelivr.net; "
                 "img-src 'self' data: blob:; "

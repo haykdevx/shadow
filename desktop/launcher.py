@@ -449,7 +449,16 @@ def run_gui(base: list[str]) -> int:
     # to the login screen (the inputs "clear"). This keeps the session.
     storage_path = str(Path.home() / ".shadow-desktop" / "webview")
     os.makedirs(storage_path, exist_ok=True)
-    webview.start(worker, private_mode=False, storage_path=storage_path)  # blocks until closed
+    # The "ShadowDesktop" UA token tells the app to grant this webview the
+    # 'unsafe-eval' CSP that pywebview's JS<->Python bridge needs (web browsers
+    # keep the strict policy). Kept browser-like otherwise so nothing UA-sniffs.
+    user_agent = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) ShadowDesktop/1.0 Safari/605.1.15"
+    )
+    webview.start(
+        worker, private_mode=False, storage_path=storage_path, user_agent=user_agent,
+    )  # blocks until closed
     if STOP_ON_EXIT:
         stop_stack(base)
     return 0
