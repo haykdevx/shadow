@@ -1,0 +1,4 @@
+# Shadow Desktop launcher dependencies (host-side; the app itself runs in Docker).
+pywebview>=5.0
+# Optional, only for `python build.py` (producing a frozen binary):
+# pyinstaller>=6.0
