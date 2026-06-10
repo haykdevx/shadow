@@ -69,7 +69,7 @@ load. (`./desktop/run.sh` still works; it forwards to `./run.sh`.)
 | `APP_BIND` / `APP_PORT` | `127.0.0.1` / `7000` | Where the app (and the window) connect. |
 | `SHADOW_DESKTOP_URL` | `http://127.0.0.1:7000` | Override the full app URL. |
 | `SHADOW_DESKTOP_TIMEOUT` | `900` | Seconds to wait for health (first build is slow). |
-| `SHADOW_DESKTOP_STOP_ON_EXIT` | `1` | Stop containers when the window closes (`0` to leave running). |
+| `SHADOW_DESKTOP_STOP_ON_EXIT` | `0` | Leave containers running when the window closes (default) so the app stays reachable; set `1` to stop them on close. |
 
 App-level settings (model endpoints, API keys, auth) live in the repo-root
 `.env`, seeded from [`shadow-desktop.env.example`](shadow-desktop.env.example).

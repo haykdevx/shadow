@@ -52,7 +52,10 @@ APP_PORT = os.getenv("APP_PORT", "7000")
 APP_URL = os.getenv("SHADOW_DESKTOP_URL", f"http://{APP_BIND}:{APP_PORT}")
 HEALTH_URL = f"{APP_URL.rstrip('/')}/api/health"
 START_TIMEOUT = int(os.getenv("SHADOW_DESKTOP_TIMEOUT", "900"))  # first build is slow
-STOP_ON_EXIT = os.getenv("SHADOW_DESKTOP_STOP_ON_EXIT", "1").lower() not in {"0", "false", "no"}
+# Keep the stack running when the window closes (default) so the app stays
+# reachable and you can reopen instantly. Set SHADOW_DESKTOP_STOP_ON_EXIT=1 to
+# shut the containers down on close.
+STOP_ON_EXIT = os.getenv("SHADOW_DESKTOP_STOP_ON_EXIT", "0").lower() in {"1", "true", "yes"}
 WINDOW_TITLE = os.getenv("SHADOW_DESKTOP_TITLE", "Shadow")
 
 
