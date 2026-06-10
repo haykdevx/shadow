@@ -314,7 +314,13 @@ def run_gui(base: list[str]) -> int:
         except Exception as exc:  # noqa: BLE001
             window.load_html(error_html(f"Unexpected error:\n{exc}"))
 
-    webview.start(worker)  # blocks until the window is closed
+    # private_mode=False + a persistent storage_path are REQUIRED for login to
+    # work: pywebview's default private mode does not persist cookies, so the
+    # session cookie set on /api/auth/login is dropped and the app bounces back
+    # to the login screen (the inputs "clear"). This keeps the session.
+    storage_path = str(Path.home() / ".shadow-desktop" / "webview")
+    os.makedirs(storage_path, exist_ok=True)
+    webview.start(worker, private_mode=False, storage_path=storage_path)  # blocks until closed
     if STOP_ON_EXIT:
         stop_stack(base)
     return 0
