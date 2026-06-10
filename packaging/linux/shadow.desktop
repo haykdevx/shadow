@@ -9,4 +9,4 @@ Terminal=false
 Categories=Network;
 Keywords=AI;assistant;chat;agent;MAGI;LLM;workspace;
 StartupNotify=true
-StartupWMClass=Shadow
+StartupWMClass=io.github.haykdevx.shadow

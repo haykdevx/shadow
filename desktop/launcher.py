@@ -260,6 +260,26 @@ def error_html(message: str) -> str:
 # --------------------------------------------------------------------------- #
 # Entry points
 # --------------------------------------------------------------------------- #
+APP_ID = "io.github.haykdevx.shadow"  # matches the installed .desktop filename
+
+
+def _brand_process() -> None:
+    """Make the OS see this window as 'Shadow' (not 'launcher.py').
+
+    The dock label/icon come from matching the window to the installed Shadow
+    .desktop entry. On Wayland the match key is the window's app_id; on X11 it
+    is WM_CLASS. GTK derives both from the program name, so we set it to the
+    .desktop id (and a human app name). Must run before the GUI loop starts.
+    """
+    sys.argv[0] = APP_ID
+    try:
+        from gi.repository import GLib  # GTK backend
+        GLib.set_prgname(APP_ID)
+        GLib.set_application_name("Shadow")
+    except Exception:
+        pass
+
+
 def run_gui(base: list[str]) -> int:
     try:
         import webview  # imported lazily so --check / --headless need no GUI deps
@@ -269,6 +289,7 @@ def run_gui(base: list[str]) -> int:
             "desktop/run.ps1 (Windows), or: pip install pywebview"
         )
 
+    _brand_process()
     window = webview.create_window(
         WINDOW_TITLE, html=SPLASH_HTML, width=1280, height=860, min_size=(900, 600),
     )
