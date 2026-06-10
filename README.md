@@ -206,6 +206,16 @@ Defaults work out of the box: clone, run, then configure models/search/email ins
 
 On first setup Shadow creates an admin account (`admin` unless `SHADOW_ADMIN_USER` is set) and prints a temporary password in the terminal — for Docker, see `docker compose logs shadow`. Use it to log in, then change it in **Settings**.
 
+### Desktop app (easiest)
+A native desktop app for **Linux · Windows · macOS** that runs the full stack locally with one command, then pins to your dock — no terminal afterwards.
+```bash
+git clone https://github.com/haykdevx/dev.git
+cd dev
+./run.sh                     # Linux/macOS — first run sets everything up
+# Windows (PowerShell):  ./desktop/run.ps1
+```
+Requires **Docker** (Desktop/Engine) and **Python 3**. The first `./run.sh` builds the image, installs a **Shadow** entry into your app menu, and opens the window; after that, search "Shadow", **pin it to your dock, and just tap to start**. Create your account on the first screen. Full guide: **[desktop/README.md](desktop/README.md)**.
+
 ### Docker (recommended)
 ```bash
 git clone https://github.com/haykdevx/dev.git

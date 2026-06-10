@@ -44,6 +44,11 @@ services:
       - SHADOW_DEVICES_PATH=${SHADOW_DEVICES_PATH:-data/shadow-devices.json}
       - SHADOW_DEVICE_JOBS_PATH=${SHADOW_DEVICE_JOBS_PATH:-data/shadow-device-jobs.json}
       - SHADOW_TELEGRAM_STORE_PATH=${SHADOW_TELEGRAM_STORE_PATH:-data/shadow-telegram-chats.json}
+      - SHADOW_MESH_ENABLED=${SHADOW_MESH_ENABLED:-false}
+      - SHADOW_MESH_GATEWAY_URL=${SHADOW_MESH_GATEWAY_URL:-http://meshcentral-gateway:8099}
+      - SHADOW_MESH_GATEWAY_KEY=${SHADOW_MESH_GATEWAY_KEY:-}
+      - SHADOW_MESH_PUBLIC_PATH=${SHADOW_MESH_PUBLIC_PATH:-/remote/}
+      - SHADOW_REMOTE_STATE_PATH=${SHADOW_REMOTE_STATE_PATH:-data/shadow-remote.json}
       - SHADOW_TELEGRAM_BOT_TOKEN=${SHADOW_TELEGRAM_BOT_TOKEN:-}
       - SHADOW_ADMIN_USER=${SHADOW_ADMIN_USER:-admin}
       - SHADOW_ADMIN_PASSWORD=${SHADOW_ADMIN_PASSWORD:-}
@@ -179,7 +184,109 @@ services:
     image: docker.io/brainicism/bgutil-ytdlp-pot-provider:latest
     restart: unless-stopped
 
+  meshcentral-init:
+    image: ghcr.io/ylianst/meshcentral:1.2.0
+    profiles: ["remote"]
+    entrypoint: ["/bin/sh", "/shadow/meshcentral-init.sh"]
+    environment:
+      - SHADOW_MESH_ADMIN_USER=${SHADOW_MESH_ADMIN_USER:-shadow_mesh_admin}
+      - SHADOW_MESH_ADMIN_PASSWORD=${SHADOW_MESH_ADMIN_PASSWORD:-}
+      - SHADOW_MESH_PUBLIC_HOST=${SHADOW_MESH_PUBLIC_HOST:-localhost}
+      - SHADOW_MESH_PUBLIC_ORIGIN=${SHADOW_MESH_PUBLIC_ORIGIN:-http://localhost:7000}
+    volumes:
+      - meshcentral-data:/opt/meshcentral/meshcentral-data
+      - ./scripts/meshcentral-init.sh:/shadow/meshcentral-init.sh:ro
+      - ./config/meshcentral/config.json.template:/shadow/config.json.template:ro
+    restart: "no"
+
+  meshcentral:
+    image: ghcr.io/ylianst/meshcentral:1.2.0
+    profiles: ["remote"]
+    environment:
+      - CONFIG_FILE=/opt/meshcentral/meshcentral-data/config.json
+      - DYNAMIC_CONFIG=false
+    volumes:
+      - meshcentral-data:/opt/meshcentral/meshcentral-data
+      - meshcentral-files:/opt/meshcentral/meshcentral-files
+      - meshcentral-backups:/opt/meshcentral/meshcentral-backups
+    ports:
+      - "${SHADOW_MESH_BIND:-127.0.0.1}:${SHADOW_MESH_PORT:-8443}:443"
+    depends_on:
+      meshcentral-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://localhost:443/remote/refresh.ashx >/dev/null"]
+      interval: 10s
+      timeout: 6s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  meshcentral-gateway:
+    image: ghcr.io/ylianst/meshcentral:1.2.0
+    profiles: ["remote"]
+    entrypoint: ["node", "/shadow/meshcentral-gateway.js"]
+    environment:
+      - PORT=8099
+      - SHADOW_MESH_GATEWAY_KEY=${SHADOW_MESH_GATEWAY_KEY:-}
+      - SHADOW_MESH_ADMIN_USER=${SHADOW_MESH_ADMIN_USER:-shadow_mesh_admin}
+      - SHADOW_MESH_ADMIN_PASSWORD=${SHADOW_MESH_ADMIN_PASSWORD:-}
+      - SHADOW_MESH_INTERNAL_URL=wss://meshcentral:443/remote
+    volumes:
+      - ./services/meshcentral-gateway/server.js:/shadow/meshcentral-gateway.js:ro
+    expose:
+      - "8099"
+    depends_on:
+      meshcentral:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Apache Guacamole — clientless HTML5 remote desktop (RDP/VNC/SSH), opt-in via
+  # the "guacamole" profile. Runs alongside (not replacing) MeshCentral until the
+  # cutover is verified. The web UI binds to loopback and is meant to be proxied
+  # as same-origin /remote/ behind Shadow's TLS, like the old console.
+  guac-postgres:
+    image: docker.io/library/postgres:15-alpine
+    profiles: ["guacamole"]
+    environment:
+      - POSTGRES_DB=${GUAC_DB_NAME:-guacamole_db}
+      - POSTGRES_USER=${GUAC_DB_USER:-guacamole}
+      - POSTGRES_PASSWORD=${GUAC_DB_PASSWORD:-guacamole}
+    volumes:
+      - guac-db:/var/lib/postgresql/data
+      - ./config/guacamole/initdb:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+
+  guacd:
+    image: docker.io/guacamole/guacd:1.5.5
+    profiles: ["guacamole"]
+    restart: unless-stopped
+
+  guacamole:
+    image: docker.io/guacamole/guacamole:1.5.5
+    profiles: ["guacamole"]
+    environment:
+      - GUACD_HOSTNAME=guacd
+      - POSTGRESQL_HOSTNAME=guac-postgres
+      - POSTGRESQL_DATABASE=${GUAC_DB_NAME:-guacamole_db}
+      - POSTGRESQL_USER=${GUAC_DB_USER:-guacamole}
+      - POSTGRESQL_PASSWORD=${GUAC_DB_PASSWORD:-guacamole}
+      - POSTGRESQL_AUTO_CREATE_ACCOUNTS=true
+      # Serve the webapp at the context root so it embeds cleanly at /remote/.
+      - WEBAPP_CONTEXT=ROOT
+    ports:
+      - "${GUAC_BIND:-127.0.0.1}:${GUAC_PORT:-8085}:8080"
+    depends_on:
+      - guacd
+      - guac-postgres
+    restart: unless-stopped
+
 volumes:
+  guac-db:
   searxng-data:
   chromadb-data:
   ntfy-cache:
+  meshcentral-data:
+  meshcentral-files:
+  meshcentral-backups:
