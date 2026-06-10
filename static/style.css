@@ -35078,6 +35078,12 @@ body.theme-frosted .modal {
   border-radius: 6px;
   padding: 8px 10px;
   font-family: inherit;
+  /* Override the global `select { height:32px }`, which combined with the
+     8px padding clipped the option text ("VOTE"/"Auto" cut off at the bottom). */
+  height: auto;
+  min-height: 40px;
+  line-height: 1.4;
+  box-sizing: border-box;
 }
 
 .magi-config-grid {
