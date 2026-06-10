@@ -403,6 +403,37 @@ def run_gui(base: list[str]) -> int:
         WINDOW_TITLE, html=SPLASH_HTML, width=1280, height=860, min_size=(900, 600),
     )
 
+    # Performance overlay injected into every loaded page. In the WebKitGTK
+    # software-rendering path, backdrop-filter blurs and the animated background
+    # patterns repaint the whole window every frame and cause the lag. Killing
+    # those (and snapping transitions) makes the UI feel smooth without an image
+    # rebuild — it takes effect on relaunch only.
+    import json as _json
+    _perf_css = (
+        "*,*::before,*::after{backdrop-filter:none!important;"
+        "-webkit-backdrop-filter:none!important;}"
+        "body[class*='bg-pattern']{animation:none!important;background-attachment:scroll!important;}"
+        "body[class*='bg-pattern']::before,body[class*='bg-pattern']::after{animation:none!important;}"
+        "*{transition-duration:120ms!important;}"
+    )
+
+    def _inject_perf(*_a) -> None:
+        js = (
+            "(function(){if(document.getElementById('shadow-perf'))return;"
+            "var s=document.createElement('style');s.id='shadow-perf';"
+            "s.textContent=" + _json.dumps(_perf_css) + ";"
+            "(document.head||document.documentElement).appendChild(s);})();"
+        )
+        try:
+            window.evaluate_js(js)
+        except Exception:
+            pass
+
+    try:
+        window.events.loaded += _inject_perf
+    except Exception:
+        pass
+
     def worker() -> None:
         try:
             ensure_env()
