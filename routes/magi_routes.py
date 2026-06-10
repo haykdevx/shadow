@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from core.database import ModelEndpoint, SessionLocal
 from core.models import ChatMessage
@@ -169,9 +176,73 @@ def _available_models(owner: str) -> list[dict[str, Any]]:
 
 
 
+def _selection_is_explicit(selection: MagiModelSelection | None) -> bool:
+    """A selection counts as user-chosen only when a concrete model is named."""
+    return bool(selection and (selection.model or "").strip())
+
+
+def _build_targets(payload: MagiDeliberationRequest, owner: str) -> list[dict[str, Any]]:
+    """Resolve one target per MAGI role.
+
+    Explicit (user-named) selections that resolve to a hidden or nonexistent
+    model are rejected with 400 rather than silently falling back, so the user
+    always knows which model actually ran. Empty selections use the auto
+    defaults, which already maximize distinct endpoint/model assignments.
+    """
+    defaults = _default_targets(owner)
+    if not defaults:
+        raise HTTPException(400, "No configured chat models are available for MAGI.")
+
+    supplied_by_role = {(r.role or "").strip().lower(): r for r in payload.roles}
+    targets: list[dict[str, Any]] = []
+    for i, role in enumerate(MAGI_ROLES):
+        selection = supplied_by_role.get(role["role"])
+        if selection is None and i < len(payload.roles):
+            selection = payload.roles[i]
+        if _selection_is_explicit(selection):
+            target = _selection_target(selection, owner)
+            if not target:
+                raise HTTPException(
+                    400,
+                    f"Selected model for {role['label']} is unavailable or hidden.",
+                )
+            targets.append(target)
+        else:
+            targets.append(defaults[i])
+    return targets
+
+
+def _resolve_judge(payload: MagiDeliberationRequest, owner: str) -> dict[str, Any] | None:
+    if not _selection_is_explicit(payload.judge):
+        return None
+    target = _selection_target(payload.judge, owner)
+    if not target:
+        raise HTTPException(400, "Selected MAGI judge model is unavailable or hidden.")
+    return target
+
+
 def setup_magi_routes(session_manager) -> APIRouter:
     router = APIRouter(prefix="/api/magi", tags=["magi"])
     orchestrator = MagiOrchestrator()
+
+    def _save_magi_turn(session_id: str, display_query: str | None, query: str, result: dict[str, Any]) -> None:
+        """Persist exactly one user message and one final MAGI assistant message."""
+        try:
+            sess = session_manager.get_session(session_id)
+            sess.add_message(ChatMessage("user", display_query or query))
+            sess.add_message(ChatMessage("assistant", format_magi_markdown(result), metadata={
+                "group_model": "MAGI",
+                "magi": result,
+            }))
+            session_manager.save_sessions()
+            try:
+                from core.database import update_session_last_accessed
+
+                update_session_last_accessed(session_id)
+            except Exception:
+                pass
+        except KeyError as exc:
+            raise HTTPException(404, f"Session '{session_id}' not found") from exc
 
     @router.get("/config")
     def magi_config(request: Request):
@@ -188,9 +259,21 @@ def setup_magi_routes(session_manager) -> APIRouter:
             "available": _available_models(owner),
             "payload_spec": {
                 "final": "string",
+                "decision": "APPROVE|REJECT|CONDITIONAL|null",
                 "mode": "vote|judge|debate",
-                "magi": [{"role": "string", "model": "string", "answer": "string", "stance": "string", "confidence": "number|null", "risks": ["string"], "dissent": "string", "next_step": "string"}],
-                "agreement": "unanimous|majority|split",
+                "resolution": "vote|debate_vote|judge|judge_deadlock|vote_fallback|deadlock_unresolved",
+                "agreement": "unanimous|majority|deadlock|insufficient|malfunction",
+                "degraded": "boolean",
+                "magi": [{
+                    "role": "string", "label": "string", "model": "string",
+                    "stance": "APPROVE|REJECT|CONDITIONAL|ERROR",
+                    "answer": "string", "confidence": "number 0..1|null",
+                    "reason": "string", "risks": ["string"], "dissent": "string",
+                    "next_step": "string", "status": "answered|debated|malfunction",
+                    "repaired": "boolean", "latency_ms": "number",
+                }],
+                "vote": {"winner": "string|null", "counts": {"STANCE": "number"}, "avg_confidence": "number 0..1|null", "dissent_count": "number"},
+                "judge": {"verdict": "string", "final": "string", "agreement_summary": "string", "dissent_summary": "string"},
             },
         }
 
@@ -198,46 +281,94 @@ def setup_magi_routes(session_manager) -> APIRouter:
     async def deliberate(payload: MagiDeliberationRequest, request: Request):
         require_user(request)
         owner = effective_user(request) or ""
-        defaults = _default_targets(owner)
-        if not defaults:
-            raise HTTPException(400, "No configured chat models are available for MAGI.")
-
-        supplied_by_role = {(r.role or "").strip().lower(): r for r in payload.roles}
-        targets: list[dict[str, Any]] = []
-        for i, role in enumerate(MAGI_ROLES):
-            selection = supplied_by_role.get(role["role"])
-            if not selection and i < len(payload.roles):
-                selection = payload.roles[i]
-            target = _selection_target(selection, owner) if selection else None
-            targets.append(target or defaults[i])
+        targets = _build_targets(payload, owner)
+        judge_target = _resolve_judge(payload, owner)
+        if payload.session_id:
+            _verify_session_owner(request, payload.session_id)
 
         result = await orchestrator.deliberate(
             payload.query,
             targets,
             mode=payload.mode,
             timeout_seconds=payload.timeout_seconds,
-            judge_target=_selection_target(payload.judge, owner) if payload.judge else None,
+            judge_target=judge_target,
         )
 
         if payload.session_id:
-            _verify_session_owner(request, payload.session_id)
-            try:
-                sess = session_manager.get_session(payload.session_id)
-                sess.add_message(ChatMessage("user", payload.display_query or payload.query))
-                sess.add_message(ChatMessage("assistant", format_magi_markdown(result), metadata={
-                    "group_model": "MAGI",
-                    "magi": result,
-                }))
-                session_manager.save_sessions()
-                try:
-                    from core.database import update_session_last_accessed
-
-                    update_session_last_accessed(payload.session_id)
-                except Exception:
-                    pass
-            except KeyError as exc:
-                raise HTTPException(404, f"Session '{payload.session_id}' not found") from exc
+            _save_magi_turn(payload.session_id, payload.display_query, payload.query, result)
 
         return result
+
+    @router.post("/deliberate/stream")
+    async def deliberate_stream(payload: MagiDeliberationRequest, request: Request):
+        require_user(request)
+        owner = effective_user(request) or ""
+        # Resolve targets and session ownership up front so validation errors
+        # surface as a normal HTTP status, not mid-stream.
+        targets = _build_targets(payload, owner)
+        judge_target = _resolve_judge(payload, owner)
+        if payload.session_id:
+            _verify_session_owner(request, payload.session_id)
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def on_event(event: dict[str, Any]) -> None:
+            await queue.put(event)
+
+        async def run() -> None:
+            try:
+                result = await orchestrator.deliberate(
+                    payload.query,
+                    targets,
+                    mode=payload.mode,
+                    timeout_seconds=payload.timeout_seconds,
+                    judge_target=judge_target,
+                    event_callback=on_event,
+                )
+                if payload.session_id:
+                    try:
+                        _save_magi_turn(payload.session_id, payload.display_query, payload.query, result)
+                    except Exception as exc:  # noqa: BLE001 - non-fatal; verdict already streamed
+                        logger.warning("MAGI stream persistence failed: %s", exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("MAGI deliberation stream failed: %s", exc)
+                await queue.put({"type": "error", "phase": "error", "error": str(exc)[:500]})
+            finally:
+                await queue.put(None)
+
+        async def event_source():
+            task = asyncio.create_task(run())
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            break
+                        yield ": keep-alive\n\n"
+                        continue
+                    if event is None:
+                        break
+                    yield f"data: {json.dumps(event, default=str)}\n\n"
+                    if await request.is_disconnected():
+                        break
+            finally:
+                # Client gone or stream finished: cancel any unfinished work.
+                if not task.done():
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await task
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     return router

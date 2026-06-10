@@ -35120,115 +35120,172 @@ body.theme-frosted .modal {
 
 .magi-btn-primary:hover { color: #fff; filter: brightness(1.08); }
 
-.magi-panel {
-  border: 1px solid color-mix(in srgb, var(--brand-color, var(--red)) 48%, var(--border));
-  border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(255,255,255,0.035), transparent 38%),
-    color-mix(in srgb, var(--bg) 94%, #000);
-  overflow: hidden;
-}
-
-.magi-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(0,0,0,0.22);
-}
-
-.magi-mark {
-  color: var(--brand-color, var(--red));
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  font-size: 12px;
-}
-
-.magi-status {
-  color: var(--fg-muted, var(--color-subheader));
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.magi-final {
-  padding: 14px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: normal;
-}
-
-.magi-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--border);
-}
-
-.magi-card {
-  min-width: 0;
-  padding: 12px;
-  background: color-mix(in srgb, var(--panel) 80%, #000);
-}
-
-.magi-card.thinking {
-  animation: magiPulse 1.4s ease-in-out infinite;
-}
-
-.magi-card.failed {
-  border-top: 2px solid #e05f6a;
-}
-
-.magi-card.answered {
-  border-top: 2px solid var(--brand-color, var(--red));
-}
-
-.magi-card-title {
-  color: var(--brand-color, var(--red));
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
-.magi-card-model {
-  margin-top: 3px;
-  color: var(--fg-muted, var(--color-subheader));
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.magi-card-stance {
-  margin-top: 10px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.magi-card-answer {
-  margin-top: 8px;
-  color: var(--fg);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.magi-error {
-  margin: 12px;
-  padding: 10px;
-  border: 1px solid rgba(224,95,106,0.45);
-  color: #ff9aa4;
+/* ============================ NERV MAGI THEME ============================
+   Dedicated deliberation sub-theme: near-black terminal, amber primary,
+   green APPROVE / red REJECT+MALFUNCTION / amber CONDITIONAL. CSS-only
+   scanlines and corner ticks; honors prefers-reduced-motion. */
+.magi-message .magi-nerv {
+  --nerv-bg: #07080a;
+  --nerv-panel: #0d0f12;
+  --nerv-line: #2a2118;
+  --nerv-amber: #ffb000;
+  --nerv-amber-dim: #b97e12;
+  --nerv-green: #36d97a;
+  --nerv-red: #ff3b3b;
+  --nerv-text: #e8d8b0;
+  font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  color: var(--nerv-text);
+  background: var(--nerv-bg);
+  border: 1px solid var(--nerv-line);
   border-radius: 6px;
-  background: rgba(224,95,106,0.08);
+  overflow: hidden;
 }
 
-@keyframes magiPulse {
-  0%, 100% { opacity: 0.72; }
+.magi-nerv-frame { position: relative; padding: 14px; }
+
+/* scanlines */
+.magi-nerv-frame::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(255,176,0,0.045) 0 1px, transparent 1px 3px);
+  mix-blend-mode: screen;
+}
+
+/* corner ticks (four L-shaped amber marks) */
+.magi-nerv-frame::after {
+  content: ""; position: absolute; inset: 6px; z-index: 2; pointer-events: none;
+  opacity: 0.5;
+  background:
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 0 0 / 14px 2px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 0 0 / 2px 14px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 100% 0 / 14px 2px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 100% 0 / 2px 14px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 0 100% / 14px 2px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 0 100% / 2px 14px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 100% 100% / 14px 2px no-repeat,
+    linear-gradient(var(--nerv-amber), var(--nerv-amber)) 100% 100% / 2px 14px no-repeat;
+}
+
+.magi-nerv-head,
+.magi-nerv-stage,
+.magi-verdict,
+.magi-details-host { position: relative; z-index: 1; }
+
+.magi-nerv-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding-bottom: 8px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--nerv-line);
+}
+.magi-nerv-mark { color: var(--nerv-amber); font-weight: 700; letter-spacing: 0.18em; font-size: 11px; }
+.magi-nerv-phase { color: var(--nerv-amber-dim); letter-spacing: 0.18em; font-size: 10px; text-transform: uppercase; }
+
+/* triangular node layout: MELCHIOR top-center, BALTHASAR / CASPER flanking the core */
+.magi-nerv-stage {
+  display: grid; gap: 10px; align-items: stretch;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-areas:
+    ".         melchior  ."
+    "balthasar core      casper";
+}
+.magi-node[data-role="melchior"] { grid-area: melchior; }
+.magi-node[data-role="balthasar"] { grid-area: balthasar; }
+.magi-node[data-role="casper"] { grid-area: casper; }
+.magi-core { grid-area: core; }
+
+.magi-node {
+  --node-accent: var(--nerv-amber-dim);
+  min-width: 0; display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; background: var(--nerv-panel);
+  border: 1px solid var(--nerv-line); border-top: 2px solid var(--node-accent);
+}
+.magi-node-id { color: var(--node-accent); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; }
+.magi-node-id b { font-weight: 700; opacity: 0.7; }
+.magi-node-model {
+  color: #7c6f55; font-size: 10px; text-transform: lowercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.magi-node-stance { color: var(--node-accent); font-size: 13px; font-weight: 700; letter-spacing: 0.08em; }
+.magi-node-meta { color: #8a7c5f; font-size: 10px; letter-spacing: 0.04em; }
+
+.magi-node[data-stance="APPROVE"] { --node-accent: var(--nerv-green); }
+.magi-node[data-stance="REJECT"],
+.magi-node[data-stance="MALFUNCTION"] { --node-accent: var(--nerv-red); }
+.magi-node[data-stance="CONDITIONAL"] { --node-accent: var(--nerv-amber); }
+.magi-node[data-state="answered"],
+.magi-node[data-state="debated"] { border-top-color: var(--node-accent); }
+.magi-node[data-state="reviewing"] { --node-accent: var(--nerv-amber); }
+.magi-node[data-state="malfunction"] { --node-accent: var(--nerv-red); border-style: dashed; }
+.magi-node[data-state="deliberating"] { animation: magiNervPulse 1.3s ease-in-out infinite; }
+.magi-node[data-state="debated"] { box-shadow: inset 0 0 0 1px rgba(255,176,0,0.22); }
+
+.magi-core {
+  --core-accent: var(--nerv-amber);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; text-align: center; padding: 10px 8px;
+  background: #0a0b0d; border: 1px solid var(--core-accent);
+  box-shadow: inset 0 0 24px rgba(255,176,0,0.06);
+}
+.magi-core-en { color: var(--core-accent); font-size: 15px; font-weight: 800; letter-spacing: 0.14em; }
+.magi-core-jp { color: var(--core-accent); font-size: 12px; opacity: 0.85; }
+.magi-core-tag { color: #8a7c5f; font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; }
+.magi-core[data-state="deliberating"] { animation: magiNervPulse 1.3s ease-in-out infinite; }
+.magi-core[data-state="approve"] { --core-accent: var(--nerv-green); box-shadow: inset 0 0 28px rgba(54,217,122,0.12); }
+.magi-core[data-state="reject"],
+.magi-core[data-state="malfunction"] { --core-accent: var(--nerv-red); box-shadow: inset 0 0 28px rgba(255,59,59,0.12); }
+.magi-core[data-state="conditional"],
+.magi-core[data-state="deadlock"] { --core-accent: var(--nerv-amber); }
+
+.magi-verdict {
+  margin-top: 12px; padding: 12px; font-size: 13px; line-height: 1.55;
+  color: var(--nerv-text); background: var(--nerv-panel);
+  border: 1px solid var(--nerv-line); white-space: normal;
+}
+.magi-verdict:empty { display: none; }
+
+.magi-details { margin-top: 10px; display: grid; gap: 6px; }
+.magi-detail {
+  background: var(--nerv-panel);
+  border: 1px solid var(--nerv-line); border-left: 2px solid var(--nerv-amber-dim);
+}
+.magi-detail[data-stance="APPROVE"] { border-left-color: var(--nerv-green); }
+.magi-detail[data-stance="REJECT"] { border-left-color: var(--nerv-red); }
+.magi-detail[data-stance="CONDITIONAL"] { border-left-color: var(--nerv-amber); }
+.magi-detail summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center;
+  gap: 10px; padding: 8px 10px;
+}
+.magi-detail summary::-webkit-details-marker { display: none; }
+.magi-detail-id { color: var(--nerv-amber); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+.magi-detail-stance { color: #cdbf9a; font-size: 11px; font-weight: 700; }
+.magi-detail-meta { margin-left: auto; color: #7c6f55; font-size: 10px; }
+.magi-detail-body { padding: 0 10px 10px; font-size: 12px; line-height: 1.5; color: var(--nerv-text); }
+.magi-detail-model { color: #7c6f55; font-size: 10px; margin-bottom: 6px; }
+.magi-detail-line { margin: 6px 0 0; }
+.magi-detail-line b,
+.magi-detail-risks b { color: var(--nerv-amber-dim); font-size: 10px; letter-spacing: 0.1em; margin-right: 4px; }
+.magi-detail-risks { margin-top: 6px; display: grid; gap: 2px; }
+.magi-detail-risks span { padding-left: 8px; border-left: 2px solid var(--nerv-line); color: #cdbf9a; }
+.magi-detail-judge { border-left-color: var(--nerv-amber); }
+.magi-detail-warn, .magi-nerv-warn { color: #ff9aa4; font-size: 12px; padding: 8px 0 0; }
+
+@keyframes magiNervPulse {
+  0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .magi-node[data-state="deliberating"],
+  .magi-core[data-state="deliberating"] { animation: none; }
+}
+
 @media (max-width: 820px) {
-  .magi-grid {
+  /* Clean stacked layout: three units then the central verdict readout. */
+  .magi-nerv-stage {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "melchior"
+      "balthasar"
+      "casper"
+      "core";
   }
 
   .magi-config-row {
@@ -35240,36 +35297,6 @@ body.theme-frosted .modal {
     min-width: 0;
     width: 100%;
   }
-}
-
-.magi-card-meta,
-.magi-card-risks,
-.magi-card-note {
-  margin-top: 8px;
-  color: var(--color-subheader, var(--fg-muted));
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.magi-card-risks strong,
-.magi-card-note strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--brand-color, var(--red));
-  font-family: ui-monospace, "JetBrains Mono", monospace;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.magi-card-risks span {
-  display: block;
-  padding-left: 10px;
-  border-left: 2px solid color-mix(in srgb, var(--brand-color, var(--red)) 40%, transparent);
-}
-
-.magi-card.debated {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-color, var(--red)) 28%, transparent);
 }
 
 /* ============================ MUSIC PLAYER ============================ */

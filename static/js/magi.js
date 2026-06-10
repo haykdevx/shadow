@@ -229,77 +229,229 @@ async function openPanel() {
   if (card) { card.style.animation = 'none'; void card.offsetWidth; card.style.animation = ''; }
 }
 
-function createThinkingPanel() {
+// ---------------------------------------------------------------------------
+// NERV deliberation UI. Each MAGI unit is a node in a triangular layout around
+// a central verdict readout. Units update independently as their SSE events
+// arrive; the backend reports confidence on a 0..1 scale which we render as %.
+// ---------------------------------------------------------------------------
+
+const ROLE_JP = { melchior: 'MELCHIOR', balthasar: 'BALTHASAR', casper: 'CASPER' };
+const ROLE_NUM = { melchior: '01', balthasar: '02', casper: '03' };
+
+function shortModel(model) {
+  return String(model || 'unknown').split('/').pop();
+}
+
+function setText(root, selector, value) {
+  const el = root && root.querySelector(selector);
+  if (el) el.textContent = value == null ? '' : String(value);
+}
+
+function confPercent(value) {
+  return typeof value === 'number' ? `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%` : '';
+}
+
+function metaParts(unit) {
+  const parts = [];
+  const conf = confPercent(unit && unit.confidence);
+  if (conf) parts.push(conf);
+  if (unit && unit.latency_ms) parts.push(`${unit.latency_ms}ms`);
+  if (unit && unit.repaired) parts.push('repaired');
+  if (unit && unit.debated) parts.push('debated');
+  return parts.join(' · ');
+}
+
+function nodeMarkup(role) {
+  return `
+    <div class="magi-node" data-role="${esc(role)}" data-state="deliberating" data-stance="">
+      <div class="magi-node-id">${esc(ROLE_JP[role])}<b>・${esc(ROLE_NUM[role])}</b></div>
+      <div class="magi-node-model">resolving…</div>
+      <div class="magi-node-stance">DELIBERATING</div>
+      <div class="magi-node-meta"></div>
+    </div>`;
+}
+
+function createNervPanel() {
   const box = document.getElementById('chat-history');
   if (!box) return null;
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-ai magi-message streaming';
+  const mode = getMode().toUpperCase();
   wrap.innerHTML = `
     <div class="role">MAGI <span class="role-timestamp">${esc(nowStamp())}</span></div>
     <div class="body">
-      <div class="magi-panel">
-        <div class="magi-panel-head">
-          <span class="magi-mark">MAGI // ${esc(getMode().toUpperCase())}</span>
-          <span class="magi-status">independent answers${getMode() === 'debate' ? ' -> peer debate' : ''} -> verdict</span>
-        </div>
-        <div class="magi-grid">
-          ${ROLE_ORDER.map(role => `
-            <div class="magi-card thinking" data-role="${esc(role)}">
-              <div class="magi-card-title">${esc(ROLE_LABELS[role])}</div>
-              <div class="magi-card-stance">THINKING</div>
-              <div class="magi-card-answer">Awaiting independent answer...</div>
+      <div class="magi-nerv" data-agreement="deliberating" data-mode="${esc(mode)}" role="group" aria-label="MAGI deliberation">
+        <div class="magi-nerv-frame">
+          <div class="magi-nerv-head">
+            <span class="magi-nerv-mark">MAGI // ${esc(mode)}</span>
+            <span class="magi-nerv-phase">DELIBERATION</span>
+          </div>
+          <div class="magi-nerv-stage">
+            ${nodeMarkup('melchior')}
+            <div class="magi-core" data-state="deliberating" aria-live="polite">
+              <div class="magi-core-en">DELIBERATING</div>
+              <div class="magi-core-jp">審議中</div>
+              <div class="magi-core-tag"></div>
             </div>
-          `).join('')}
+            ${nodeMarkup('balthasar')}
+            ${nodeMarkup('casper')}
+          </div>
+          <div class="magi-verdict" aria-live="polite"></div>
+          <div class="magi-details-host"></div>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
   box.appendChild(wrap);
   uiModule.scrollHistory();
-  return wrap;
+  return wrap.querySelector('.magi-nerv');
 }
 
-function renderResult(holder, data) {
-  if (!holder) return;
-  holder.classList.remove('streaming');
-  const body = holder.querySelector('.body');
-  const final = textHtml(data.final || '');
-  const cards = (data.magi || []).map(item => {
-    const risks = Array.isArray(item.risks) ? item.risks : [];
-    return `
-      <div class="magi-card ${item.ok ? 'answered' : 'failed'} ${item.debated ? 'debated' : ''}">
-        <div class="magi-card-title">${esc(item.label || item.role)}</div>
-        <div class="magi-card-model">${esc(item.model || 'unknown')}</div>
-        <div class="magi-card-stance">${esc(item.stance || (item.ok ? 'ANSWER' : 'ERROR'))}</div>
-        <div class="magi-card-meta">Confidence: ${item.confidence ?? 'n/a'}${item.status ? ` / ${esc(item.status)}` : ''}</div>
-        <div class="magi-card-answer">${textHtml(item.answer || item.error || '')}</div>
-        ${risks.length ? `<div class="magi-card-risks"><strong>Risks</strong>${risks.map(r => `<span>${esc(r)}</span>`).join('')}</div>` : ''}
-        ${item.dissent ? `<div class="magi-card-note"><strong>Dissent</strong>${textHtml(item.dissent)}</div>` : ''}
-        ${item.next_step ? `<div class="magi-card-note"><strong>Next</strong>${textHtml(item.next_step)}</div>` : ''}
-        ${item.debate_error ? `<div class="magi-error">Debate fallback: ${esc(item.debate_error)}</div>` : ''}
+function applyUnit(nerv, role, unit, phase) {
+  const node = nerv && nerv.querySelector(`.magi-node[data-role="${role}"]`);
+  if (!node) return;
+  if (unit && unit.model) setText(node, '.magi-node-model', shortModel(unit.model));
+  if (phase === 'deliberating') {
+    node.dataset.state = 'deliberating';
+    setText(node, '.magi-node-stance', 'DELIBERATING');
+    return;
+  }
+  if (phase === 'peer_review') {
+    node.dataset.state = 'reviewing';
+    setText(node, '.magi-node-stance', 'PEER REVIEW');
+    return;
+  }
+  const ok = unit && unit.ok;
+  if (!ok || phase === 'malfunction') {
+    node.dataset.state = 'malfunction';
+    node.dataset.stance = 'MALFUNCTION';
+    setText(node, '.magi-node-stance', 'MALFUNCTION');
+    setText(node, '.magi-node-meta', unit && unit.latency_ms ? `${unit.latency_ms}ms` : '');
+    node._unit = unit;
+    return;
+  }
+  const stance = unit.stance || 'ANSWER';
+  node.dataset.state = unit.debated ? 'debated' : 'answered';
+  node.dataset.stance = stance;
+  setText(node, '.magi-node-stance', stance);
+  setText(node, '.magi-node-meta', metaParts(unit));
+  node._unit = unit;
+}
+
+function coreState(result) {
+  const agreement = String(result.agreement || '').toLowerCase();
+  if (agreement === 'malfunction') return { en: 'MALFUNCTION', jp: '停止', cls: 'malfunction' };
+  const decision = String(result.decision || '').toUpperCase();
+  if (decision === 'APPROVE') return { en: 'APPROVED', jp: '可決', cls: 'approve' };
+  if (decision === 'REJECT') return { en: 'REJECTED', jp: '否決', cls: 'reject' };
+  if (decision === 'CONDITIONAL') return { en: 'CONDITIONAL', jp: '条件付', cls: 'conditional' };
+  if (agreement === 'deadlock') return { en: 'DEADLOCK', jp: '対立', cls: 'deadlock' };
+  if (agreement === 'insufficient') return { en: 'INSUFFICIENT', jp: '定足数不足', cls: 'deadlock' };
+  return { en: 'RESOLVED', jp: '解決', cls: 'answered' };
+}
+
+function unitDetail(unit) {
+  const ok = unit.ok;
+  const stance = unit.stance || (ok ? 'ANSWER' : 'ERROR');
+  const risks = Array.isArray(unit.risks) ? unit.risks : [];
+  const conf = confPercent(unit.confidence) || 'n/a';
+  const meta = [conf, unit.latency_ms ? `${unit.latency_ms}ms` : '', unit.repaired ? 'repaired' : '', unit.debated ? 'debated' : '']
+    .filter(Boolean).join(' · ');
+  return `
+    <details class="magi-detail" data-stance="${esc(stance)}">
+      <summary>
+        <span class="magi-detail-id">${esc(unit.display || unit.label || unit.role)}</span>
+        <span class="magi-detail-stance">${esc(stance)}</span>
+        <span class="magi-detail-meta">${esc(meta)}</span>
+      </summary>
+      <div class="magi-detail-body">
+        <div class="magi-detail-model">${esc(unit.model || 'unknown')}</div>
+        <div>${textHtml(unit.answer || unit.error || '')}</div>
+        ${unit.reason ? `<p class="magi-detail-line"><b>REASON</b> ${textHtml(unit.reason)}</p>` : ''}
+        ${risks.length ? `<div class="magi-detail-risks"><b>RISKS</b>${risks.map(r => `<span>${esc(r)}</span>`).join('')}</div>` : ''}
+        ${unit.dissent ? `<p class="magi-detail-line"><b>DISSENT</b> ${textHtml(unit.dissent)}</p>` : ''}
+        ${unit.next_step ? `<p class="magi-detail-line"><b>NEXT</b> ${textHtml(unit.next_step)}</p>` : ''}
+        ${unit.debate_error ? `<p class="magi-detail-warn">Debate fallback: ${esc(unit.debate_error)}</p>` : ''}
       </div>
-    `;
-  }).join('');
-  body.innerHTML = `
-    <div class="magi-panel ${data.degraded ? 'degraded' : ''}">
-      <div class="magi-panel-head">
-        <span class="magi-mark">MAGI // ${esc(String(data.mode || 'vote').toUpperCase())}</span>
-        <span class="magi-status">${esc(data.agreement || 'split')}${data.vote?.avg_confidence !== undefined && data.vote?.avg_confidence !== null ? ` / ${data.vote.avg_confidence}%` : ''}${data.degraded ? ' / degraded' : ''}</span>
-      </div>
-      <div class="magi-final">${final}</div>
-      ${data.judge_error ? `<div class="magi-error">Judge fallback: ${esc(data.judge_error)}</div>` : ''}
-      <div class="magi-grid">${cards}</div>
-    </div>
-  `;
-  holder.dataset.raw = data.final || '';
+    </details>`;
+}
+
+function renderResolved(nerv, result) {
+  if (!nerv) return;
+  const msg = nerv.closest('.magi-message');
+  if (msg) msg.classList.remove('streaming');
+
+  // result.magi is authoritative for final node state.
+  (result.magi || []).forEach(unit => {
+    applyUnit(nerv, unit.role, unit, unit.ok ? (unit.debated ? 'debated' : 'answered') : 'malfunction');
+  });
+
+  const core = nerv.querySelector('.magi-core');
+  const state = coreState(result);
+  if (core) {
+    core.dataset.state = state.cls;
+    setText(core, '.magi-core-en', state.en);
+    setText(core, '.magi-core-jp', state.jp);
+    const tags = [String(result.agreement || '').toUpperCase()];
+    if (result.degraded) tags.push('DEGRADED');
+    setText(core, '.magi-core-tag', tags.filter(Boolean).join(' · '));
+  }
+  nerv.dataset.agreement = String(result.agreement || '').toLowerCase();
+  nerv.querySelector('.magi-nerv-phase').textContent = 'RESOLVED';
+
+  const verdict = nerv.querySelector('.magi-verdict');
+  if (verdict) verdict.innerHTML = textHtml(result.final || '');
+
+  const judge = result.judge
+    ? `<details class="magi-detail magi-detail-judge" data-stance="${esc(result.judge.verdict || '')}">
+        <summary><span class="magi-detail-id">JUDGE SYNTHESIS</span><span class="magi-detail-stance">${esc(result.judge.verdict || '')}</span></summary>
+        <div class="magi-detail-body">
+          ${result.judge.agreement_summary ? `<p class="magi-detail-line"><b>AGREEMENT</b> ${textHtml(result.judge.agreement_summary)}</p>` : ''}
+          ${result.judge.dissent_summary ? `<p class="magi-detail-line"><b>DISSENT</b> ${textHtml(result.judge.dissent_summary)}</p>` : ''}
+        </div>
+      </details>`
+    : '';
+  const judgeErr = result.judge_error ? `<div class="magi-nerv-warn">Judge fallback: ${esc(result.judge_error)}</div>` : '';
+  const host = nerv.querySelector('.magi-details-host');
+  if (host) {
+    host.innerHTML = `${judgeErr}<div class="magi-details">${(result.magi || []).map(unitDetail).join('')}${judge}</div>`;
+  }
+  nerv.dataset.raw = result.final || '';
   uiModule.scrollHistory();
 }
 
-function renderError(holder, err) {
-  if (!holder) return;
-  holder.classList.remove('streaming');
-  const body = holder.querySelector('.body');
-  body.innerHTML = `<div class="magi-panel degraded"><div class="magi-error">MAGI failed: ${esc(err.message || err)}</div></div>`;
+function renderError(nerv, err) {
+  if (!nerv) return;
+  const msg = nerv.closest('.magi-message');
+  if (msg) msg.classList.remove('streaming');
+  const core = nerv.querySelector('.magi-core');
+  if (core) {
+    core.dataset.state = 'malfunction';
+    setText(core, '.magi-core-en', 'MALFUNCTION');
+    setText(core, '.magi-core-jp', '停止');
+    setText(core, '.magi-core-tag', 'SYSTEM ERROR');
+  }
+  nerv.dataset.agreement = 'malfunction';
+  const verdict = nerv.querySelector('.magi-verdict');
+  if (verdict) verdict.innerHTML = `<div class="magi-nerv-warn">MAGI failed: ${esc(err && err.message ? err.message : err)}</div>`;
+  uiModule.scrollHistory();
+}
+
+function handleEvent(nerv, event) {
+  if (!event || typeof event !== 'object') return;
+  if (event.type === 'unit') {
+    applyUnit(nerv, event.role, event.unit || event, event.phase);
+  } else if (event.type === 'system') {
+    const phase = nerv.querySelector('.magi-nerv-phase');
+    if (phase) phase.textContent = event.phase === 'judge' ? 'JUDGE' : 'PEER REVIEW';
+    const core = nerv.querySelector('.magi-core');
+    if (core && core.dataset.state === 'deliberating') {
+      setText(core, '.magi-core-tag', event.phase === 'judge' ? 'SYNTHESIZING' : 'PEER REVIEW');
+    }
+  } else if (event.type === 'resolved') {
+    renderResolved(nerv, event.result || {});
+  } else if (event.type === 'error') {
+    renderError(nerv, new Error(event.error || 'deliberation failed'));
+  }
 }
 
 function rolePayload() {
@@ -308,9 +460,10 @@ function rolePayload() {
 }
 
 async function runDeliberation({ query, displayQuery, sessionId }) {
-  const holder = createThinkingPanel();
+  const nerv = createNervPanel();
+  let resolved = false;
   try {
-    const res = await fetch(`${API_BASE}/api/magi/deliberate`, {
+    const res = await fetch(`${API_BASE}/api/magi/deliberate/stream`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
@@ -322,12 +475,33 @@ async function runDeliberation({ query, displayQuery, sessionId }) {
         roles: rolePayload(),
       }),
     });
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    renderResult(holder, data);
-    return data;
+    if (!res.ok || !res.body) throw new Error((await res.text().catch(() => '')) || `HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const dataLine = frame.split('\n').find(line => line.startsWith('data:'));
+        if (!dataLine) continue; // keep-alive comment
+        const json = dataLine.slice(5).trim();
+        if (!json) continue;
+        let event;
+        try { event = JSON.parse(json); } catch (_) { continue; }
+        handleEvent(nerv, event);
+        if (event.type === 'resolved') resolved = true;
+      }
+    }
+    if (!resolved) throw new Error('MAGI stream ended before a verdict was produced.');
+    return nerv;
   } catch (err) {
-    renderError(holder, err);
+    renderError(nerv, err);
     throw err;
   }
 }

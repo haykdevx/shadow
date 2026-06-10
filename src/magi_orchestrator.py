@@ -1,13 +1,9 @@
-"""MAGI deliberation orchestration.
-
-Routes resolve auth and model targets. This module owns the execution graph:
-fan-out, optional debate, vote resolution, optional judge synthesis, and
-degraded-mode handling.
-"""
+"""Concurrent, resilient orchestration for Shadow's three MAGI units."""
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -16,22 +12,84 @@ from typing import Any
 
 from src.magi_deliberation import (
     MAGI_ROLES,
+    MagiParseError,
     build_debate_messages,
     build_judge_messages,
+    build_repair_messages,
     build_role_messages,
+    parse_judge_response,
     parse_magi_response,
     vote_resolution,
 )
 
 MagiCall = Callable[..., Awaitable[str]]
+EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 class MagiOrchestrator:
-    """Coordinate Shadow's three-role deliberation without route coupling."""
+    """Run fan-out, peer review, voting, and judge synthesis."""
 
     def __init__(self, call_model: MagiCall | None = None, logger_: logging.Logger | None = None):
         self.call_model = call_model or self._default_call_model
         self.logger = logger_ or logging.getLogger(__name__)
+
+    async def _emit(self, callback: EventCallback | None, event: dict[str, Any]) -> None:
+        if callback is None:
+            return
+        try:
+            result = callback(event)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("MAGI event callback failed: %s", exc)
+
+    async def _structured_call(
+        self,
+        target: dict[str, Any],
+        messages: list[dict[str, str]],
+        *,
+        parser: Callable[[str], dict[str, Any]],
+        prompt_type: str,
+        timeout_seconds: int,
+        max_tokens: int,
+        temperature: float,
+        judge: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        """Call once, then re-ask once only when the structure is invalid."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        current_messages = messages
+        repaired = False
+        last_error: Exception | None = None
+
+        for attempt in range(2):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(f"{prompt_type} exceeded {timeout_seconds}s")
+            raw = await asyncio.wait_for(
+                self.call_model(
+                    target["endpoint"],
+                    target["model"],
+                    current_messages,
+                    headers=target.get("headers") or {},
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=max(1, int(remaining)),
+                    max_retries=1,
+                    prompt_type=prompt_type if attempt == 0 else f"{prompt_type}-repair",
+                ),
+                timeout=remaining,
+            )
+            try:
+                return parser(raw), repaired
+            except MagiParseError as exc:
+                last_error = exc
+                if attempt == 1:
+                    break
+                repaired = True
+                current_messages = build_repair_messages(messages, raw, str(exc), judge=judge)
+
+        raise MagiParseError(f"invalid structured response after one repair attempt: {last_error}")
 
     async def run_role(
         self,
@@ -39,49 +97,59 @@ class MagiOrchestrator:
         target: dict[str, Any],
         query: str,
         timeout_seconds: int,
+        event_callback: EventCallback | None = None,
     ) -> dict[str, Any]:
         started = time.time()
         base = self._base_result(role, target)
+        await self._emit(event_callback, {
+            "type": "unit",
+            "phase": "deliberating",
+            "role": role["role"],
+            "label": role["label"],
+            "display": role.get("display"),
+            "model": target.get("model"),
+        })
         try:
-            raw = await self.call_model(
-                target["endpoint"],
-                target["model"],
+            parsed, repaired = await self._structured_call(
+                target,
                 build_role_messages(query, role),
-                headers=target.get("headers") or {},
-                temperature=0.2,
-                max_tokens=1200,
-                timeout=timeout_seconds,
-                max_retries=1,
+                parser=parse_magi_response,
                 prompt_type="magi",
+                timeout_seconds=timeout_seconds,
+                max_tokens=1200,
+                temperature=0.2,
             )
-            parsed = parse_magi_response(raw)
-            return {
+            result = {
                 **base,
                 "ok": True,
                 "status": "answered",
-                "stance": parsed["stance"],
-                "answer": parsed["answer"],
-                "confidence": parsed.get("confidence"),
-                "risks": parsed.get("risks") or [],
-                "dissent": parsed.get("dissent") or "",
-                "next_step": parsed.get("next_step") or "",
+                **parsed,
+                "repaired": repaired,
                 "latency_ms": self._elapsed_ms(started),
             }
         except Exception as exc:  # noqa: BLE001
-            self.logger.warning("MAGI role %s failed: %s", role["role"], exc)
-            return {
+            self.logger.warning("MAGI role %s malfunctioned: %s", role["role"], exc)
+            result = {
                 **base,
                 "ok": False,
-                "status": "failed",
+                "status": "malfunction",
                 "stance": "ERROR",
                 "answer": "",
                 "confidence": None,
+                "reason": "",
                 "risks": [],
                 "dissent": "",
                 "next_step": "",
-                "error": str(exc)[:300],
+                "error": str(exc)[:400],
                 "latency_ms": self._elapsed_ms(started),
             }
+        await self._emit(event_callback, {
+            "type": "unit",
+            "phase": result["status"],
+            "role": role["role"],
+            "unit": result,
+        })
+        return result
 
     async def run_debate_role(
         self,
@@ -90,53 +158,62 @@ class MagiOrchestrator:
         query: str,
         first_round: list[dict[str, Any]],
         timeout_seconds: int,
+        event_callback: EventCallback | None = None,
     ) -> dict[str, Any]:
         original = next((item for item in first_round if item.get("role") == role["role"]), None)
         if not original or not original.get("ok"):
             return original or {
                 **self._base_result(role, target),
                 "ok": False,
-                "status": "failed",
+                "status": "malfunction",
                 "stance": "ERROR",
                 "answer": "",
-                "error": "Initial round failed",
+                "error": "Initial round malfunctioned",
             }
 
+        await self._emit(event_callback, {
+            "type": "unit",
+            "phase": "peer_review",
+            "role": role["role"],
+            "unit": original,
+        })
         started = time.time()
         try:
-            raw = await self.call_model(
-                target["endpoint"],
-                target["model"],
+            parsed, repaired = await self._structured_call(
+                target,
                 build_debate_messages(query, first_round, role),
-                headers=target.get("headers") or {},
-                temperature=0.15,
-                max_tokens=1200,
-                timeout=timeout_seconds,
-                max_retries=1,
+                parser=parse_magi_response,
                 prompt_type="magi-debate",
+                timeout_seconds=timeout_seconds,
+                max_tokens=1200,
+                temperature=0.15,
             )
-            parsed = parse_magi_response(raw)
-            return {
+            result = {
                 **original,
+                **parsed,
                 "status": "debated",
-                "stance": parsed["stance"],
-                "answer": parsed["answer"],
-                "confidence": parsed.get("confidence"),
-                "risks": parsed.get("risks") or [],
-                "dissent": parsed.get("dissent") or "",
-                "next_step": parsed.get("next_step") or "",
+                "original_stance": original.get("stance"),
                 "original_answer": original.get("answer") or "",
                 "debated": True,
+                "repaired": repaired,
                 "latency_ms": self._elapsed_ms(started),
             }
         except Exception as exc:  # noqa: BLE001
-            self.logger.warning("MAGI debate role %s failed: %s", role["role"], exc)
-            return {
+            self.logger.warning("MAGI debate role %s failed; retaining round one: %s", role["role"], exc)
+            result = {
                 **original,
-                "status": "debate_failed",
+                "status": "answered",
                 "debated": False,
-                "debate_error": str(exc)[:300],
+                "debate_status": "malfunction",
+                "debate_error": str(exc)[:400],
             }
+        await self._emit(event_callback, {
+            "type": "unit",
+            "phase": result["status"],
+            "role": role["role"],
+            "unit": result,
+        })
+        return result
 
     async def deliberate(
         self,
@@ -146,59 +223,92 @@ class MagiOrchestrator:
         mode: str = "vote",
         timeout_seconds: int = 180,
         judge_target: dict[str, Any] | None = None,
+        event_callback: EventCallback | None = None,
     ) -> dict[str, Any]:
-        """Run the full MAGI graph and return the public structured payload."""
+        if mode not in {"vote", "debate", "judge"}:
+            raise ValueError(f"Unsupported MAGI resolution mode: {mode}")
         active_targets = self._normalize_targets(targets)
-        magi = await asyncio.gather(*[
-            self.run_role(role, target, query, timeout_seconds)
+
+        first_round = await asyncio.gather(*[
+            self.run_role(role, target, query, timeout_seconds, event_callback)
             for role, target in zip(MAGI_ROLES, active_targets)
         ])
+        magi = first_round
 
-        if mode == "debate" and sum(1 for item in magi if item.get("ok")) >= 2:
+        if mode == "debate" and sum(1 for item in first_round if item.get("ok")) >= 2:
+            await self._emit(event_callback, {"type": "system", "phase": "peer_review"})
             magi = await asyncio.gather(*[
-                self.run_debate_role(role, target, query, magi, timeout_seconds)
+                self.run_debate_role(role, target, query, first_round, timeout_seconds, event_callback)
                 for role, target in zip(MAGI_ROLES, active_targets)
             ])
 
         vote = vote_resolution(magi)
         final = vote["final"]
-        resolution = "debate" if mode == "debate" else "vote"
+        resolution = "debate_vote" if mode == "debate" else "vote"
         judge_error = None
+        judge_result: dict[str, Any] | None = None
+        answered_ok = sum(1 for item in magi if item.get("ok"))
+        # Explicit judge mode runs on any valid unit; an auto-escalation from a
+        # deadlock only makes sense when at least two units actually voted.
+        should_judge = (mode == "judge" and answered_ok >= 1) or (
+            bool(vote.get("requires_judge")) and answered_ok >= 2
+        )
 
-        if mode == "judge" and any(m.get("ok") for m in magi):
+        if should_judge:
+            selected_judge = judge_target or self._strongest_target(magi, active_targets)
+            await self._emit(event_callback, {
+                "type": "system",
+                "phase": "judge",
+                "model": selected_judge.get("model"),
+            })
             try:
-                final = await self.call_model(
-                    (judge_target or active_targets[0])["endpoint"],
-                    (judge_target or active_targets[0])["model"],
+                judge_result, judge_repaired = await self._structured_call(
+                    selected_judge,
                     build_judge_messages(query, magi),
-                    headers=(judge_target or active_targets[0]).get("headers") or {},
-                    temperature=0.15,
-                    max_tokens=1600,
-                    timeout=timeout_seconds,
-                    max_retries=1,
+                    parser=parse_judge_response,
                     prompt_type="magi-judge",
+                    timeout_seconds=timeout_seconds,
+                    max_tokens=1600,
+                    temperature=0.1,
+                    judge=True,
                 )
-                resolution = "judge"
+                judge_result["model"] = selected_judge.get("model")
+                judge_result["endpoint_id"] = selected_judge.get("endpoint_id")
+                judge_result["repaired"] = judge_repaired
+                final = (
+                    f"{judge_result['verdict']}: {judge_result['final']}\n\n"
+                    f"Agreement: {judge_result['agreement_summary']}\n"
+                    f"Dissent: {judge_result['dissent_summary']}"
+                )
+                resolution = "judge" if mode == "judge" else "judge_deadlock"
             except Exception as exc:  # noqa: BLE001
-                judge_error = str(exc)[:300]
-                resolution = "vote_fallback"
+                judge_error = str(exc)[:400]
+                resolution = "vote_fallback" if vote.get("winner") else "deadlock_unresolved"
 
-        return {
+        result = {
+            "schema_version": 2,
             "id": str(uuid.uuid4()),
             "final": final,
+            "decision": (judge_result or {}).get("verdict") or vote.get("winner"),
             "mode": mode,
             "resolution": resolution,
             "magi": magi,
             "agreement": vote["agreement"],
             "vote": {
-                "winner": vote["winner"],
-                "counts": vote["counts"],
+                "winner": vote.get("winner"),
+                "counts": vote.get("counts") or {},
                 "avg_confidence": vote.get("avg_confidence"),
+                "dissent": vote.get("dissent") or [],
                 "dissent_count": vote.get("dissent_count", 0),
+                "answered_count": vote.get("answered_count", 0),
             },
-            "degraded": any(not m.get("ok") for m in magi) or bool(judge_error),
+            "judge": judge_result,
+            "degraded": any(not item.get("ok") for item in magi) or bool(judge_error),
+            "malfunction_count": sum(1 for item in magi if not item.get("ok")),
             "judge_error": judge_error,
         }
+        await self._emit(event_callback, {"type": "resolved", "phase": "resolved", "result": result})
+        return result
 
     @staticmethod
     async def _default_call_model(*args, **kwargs) -> str:
@@ -211,6 +321,7 @@ class MagiOrchestrator:
         return {
             "role": role["role"],
             "label": role["label"],
+            "display": role.get("display") or role["label"],
             "title": role["title"],
             "model": target.get("model"),
             "endpoint_id": target.get("endpoint_id"),
@@ -223,9 +334,29 @@ class MagiOrchestrator:
 
     @staticmethod
     def _normalize_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not targets:
-            raise ValueError("MAGI requires at least one model target")
-        out = list(targets)
+        valid = [
+            dict(target)
+            for target in targets
+            if target and target.get("endpoint") and target.get("model")
+        ]
+        if not valid:
+            raise ValueError("MAGI requires at least one valid model target")
+        out = list(valid)
         while len(out) < len(MAGI_ROLES):
-            out.append(dict(out[len(out) % len(targets)]))
+            out.append(dict(valid[len(out) % len(valid)]))
         return out[: len(MAGI_ROLES)]
+
+    @staticmethod
+    def _strongest_target(
+        magi: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        candidates = [
+            (float(item.get("confidence") or 0), index)
+            for index, item in enumerate(magi)
+            if item.get("ok") and index < len(targets)
+        ]
+        if not candidates:
+            return targets[0]
+        _, index = max(candidates)
+        return targets[index]

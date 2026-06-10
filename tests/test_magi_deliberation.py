@@ -1,99 +1,317 @@
+"""Tests for the strict MAGI deliberation contract.
+
+Provider output is untrusted until it parses into the verdict schema. These
+tests pin the strict parser, the resolution algorithm, and the orchestrator's
+concurrency / repair / debate / judge behavior. They intentionally do NOT
+accept arbitrary prose as a successful verdict.
+"""
+
 import asyncio
+import json
+
+import pytest
 
 from src.magi_deliberation import (
-    MAGI_ROLES,
+    MagiParseError,
     agreement_state,
-    build_debate_messages,
+    parse_judge_response,
     parse_magi_response,
     vote_resolution,
 )
 from src.magi_orchestrator import MagiOrchestrator
 
 
-def test_parse_magi_json_response():
-    parsed = parse_magi_response('{"stance":"approve","confidence":82,"answer":"Ship it with tests.","risks":["regression"],"dissent":"watch CI","next_step":"run smoke"}')
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def good(stance="APPROVE", answer="Proceed with guardrails.",
+         reason="Evidence supports it.", confidence=0.8, risks=None):
+    return json.dumps({
+        "stance": stance,
+        "answer": answer,
+        "reason": reason,
+        "confidence": confidence,
+        "risks": risks or [],
+    })
+
+
+def target(model, eid):
+    return {
+        "endpoint": "http://local/v1/chat/completions",
+        "model": model,
+        "headers": {},
+        "endpoint_id": eid,
+        "endpoint_name": eid.upper(),
+    }
+
+
+def run(call, mode="vote", **kwargs):
+    targets = [target("m-a", "a"), target("m-b", "b"), target("m-c", "c")]
+    targets = kwargs.pop("targets", targets)
+    return asyncio.run(
+        MagiOrchestrator(call).deliberate("ship it?", targets, mode=mode, timeout_seconds=10, **kwargs)
+    )
+
+
+def unit(magi, model):
+    return next(u for u in magi if u["model"] == model)
+
+
+# --------------------------------------------------------------------------- #
+# Parser: structured-output contract
+# --------------------------------------------------------------------------- #
+def test_valid_strict_json():
+    parsed = parse_magi_response(
+        '{"stance":"APPROVE","answer":"Ship it.","reason":"Tests pass.","confidence":0.82}'
+    )
     assert parsed["stance"] == "APPROVE"
-    assert parsed["answer"] == "Ship it with tests."
-    assert parsed["confidence"] == 82
-    assert parsed["risks"] == ["regression"]
-    assert parsed["dissent"] == "watch CI"
-    assert parsed["next_step"] == "run smoke"
+    assert parsed["answer"] == "Ship it."
+    assert parsed["reason"] == "Tests pass."
+    assert parsed["confidence"] == 0.82
 
 
-def test_parse_magi_fenced_json_response():
-    parsed = parse_magi_response('```json\n{"stance":"conditional","answer":"Only after backup."}\n```')
+def test_fenced_json():
+    raw = '```json\n{"stance":"conditional","answer":"Only after backup.","reason":"Risk of data loss.","confidence":0.5}\n```'
+    parsed = parse_magi_response(raw)
     assert parsed["stance"] == "CONDITIONAL"
     assert parsed["answer"] == "Only after backup."
-    assert parsed["confidence"] is None
-    assert parsed["risks"] == []
+    assert parsed["confidence"] == 0.5
 
 
-def test_vote_resolution_majority_with_dissent():
-    magi = [
-        {"ok": True, "stance": "APPROVE", "answer": "yes", "confidence": 90, "dissent": ""},
-        {"ok": True, "stance": "APPROVE", "answer": "yes", "confidence": 80, "dissent": ""},
-        {"ok": True, "stance": "REJECT", "answer": "no", "confidence": 70, "dissent": "risk"},
-    ]
-    result = vote_resolution(magi)
+def test_missing_required_field_rejected():
+    # No reason -> not a valid verdict.
+    with pytest.raises(MagiParseError):
+        parse_magi_response('{"stance":"APPROVE","answer":"yes","confidence":0.5}')
+
+
+def test_invalid_stance_rejected():
+    with pytest.raises(MagiParseError):
+        parse_magi_response('{"stance":"PROBABLY","answer":"yes","reason":"because","confidence":0.5}')
+
+
+def test_percentage_confidence_normalized():
+    parsed = parse_magi_response(
+        '{"stance":"APPROVE","answer":"go","reason":"fine","confidence":82}'
+    )
+    assert parsed["confidence"] == 0.82
+
+
+def test_prose_is_not_a_verdict():
+    with pytest.raises(MagiParseError):
+        parse_magi_response("I think we should probably approve this, it looks fine.")
+
+
+# --------------------------------------------------------------------------- #
+# Orchestrator: one structured-output repair attempt
+# --------------------------------------------------------------------------- #
+def test_repair_succeeds():
+    async def call(endpoint, model, messages, **kwargs):
+        if kwargs.get("prompt_type", "").endswith("-repair"):
+            return good()
+        return '{"stance":"APPROVE","answer":"go"}'  # missing reason -> invalid
+
+    result = run(call)
+    assert all(u["ok"] for u in result["magi"])
+    assert all(u["repaired"] for u in result["magi"])
+    assert result["agreement"] == "unanimous"
+
+
+def test_repair_fails_marks_malfunction():
+    async def call(endpoint, model, messages, **kwargs):
+        return '{"stance":"APPROVE","answer":"go"}'  # always invalid (no reason)
+
+    result = run(call)
+    assert all(not u["ok"] for u in result["magi"])
+    assert all(u["status"] == "malfunction" for u in result["magi"])
+    assert result["agreement"] == "malfunction"
+    assert result["decision"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Resolution algorithm
+# --------------------------------------------------------------------------- #
+def test_unanimous_vote():
+    async def call(endpoint, model, messages, **kwargs):
+        return good("APPROVE")
+
+    result = run(call)
+    assert result["agreement"] == "unanimous"
+    assert result["vote"]["winner"] == "APPROVE"
+    assert result["decision"] == "APPROVE"
+
+
+def test_majority_with_dissent():
+    async def call(endpoint, model, messages, **kwargs):
+        if model == "m-c":
+            return good("REJECT", "Block it.", "Too risky.", 0.7)
+        return good("APPROVE", "Ship.", "Looks fine.", 0.85)
+
+    result = run(call)
     assert result["agreement"] == "majority"
-    assert result["winner"] == "APPROVE"
-    assert result["counts"] == {"APPROVE": 2, "REJECT": 1}
-    assert result["avg_confidence"] == 80.0
-    assert result["dissent_count"] == 1
+    assert result["vote"]["winner"] == "APPROVE"
+    assert result["vote"]["counts"] == {"APPROVE": 2, "REJECT": 1}
+    assert result["vote"]["dissent_count"] == 1
 
 
-def test_agreement_degraded_two_answered():
+def test_three_way_deadlock():
     magi = [
-        {"ok": True, "stance": "CONDITIONAL", "answer": "guard it"},
-        {"ok": True, "stance": "CONDITIONAL", "answer": "guard it"},
-        {"ok": False, "stance": "ERROR", "error": "timeout"},
+        {"ok": True, "role": "melchior", "label": "M", "stance": "APPROVE", "answer": "a", "confidence": 0.6},
+        {"ok": True, "role": "balthasar", "label": "B", "stance": "REJECT", "answer": "b", "confidence": 0.6},
+        {"ok": True, "role": "casper", "label": "C", "stance": "CONDITIONAL", "answer": "c", "confidence": 0.6},
     ]
-    assert agreement_state(magi) == "unanimous"
-    result = vote_resolution(magi)
-    assert "Degraded" in result["final"]
+    r = vote_resolution(magi)
+    assert r["agreement"] == "deadlock"
+    assert r["winner"] is None
+    assert r["requires_judge"] is True
+    assert r["answered_count"] == 3
 
 
-def test_build_debate_messages_excludes_current_role_and_requests_json():
+def test_two_unit_deadlock_after_one_failure():
     magi = [
-        {"role": "melchior", "ok": True, "label": "MELCHIOR-01", "stance": "APPROVE", "answer": "ship", "risks": []},
-        {"role": "balthasar", "ok": True, "label": "BALTHASAR-02", "stance": "REJECT", "answer": "backup first", "risks": ["data loss"]},
+        {"ok": True, "role": "melchior", "label": "M", "stance": "APPROVE", "answer": "a", "confidence": 0.6},
+        {"ok": True, "role": "balthasar", "label": "B", "stance": "REJECT", "answer": "b", "confidence": 0.6},
+        {"ok": False, "role": "casper", "label": "C", "stance": "ERROR", "error": "timeout"},
     ]
-    messages = build_debate_messages("deploy?", magi, MAGI_ROLES[0])
-    joined = "\n".join(m["content"] for m in messages)
-    assert "BALTHASAR-02" in joined
-    assert "MELCHIOR-01" not in joined.split("Peer MAGI responses:", 1)[-1]
-    assert "strict JSON" in joined
+    r = vote_resolution(magi)
+    assert r["agreement"] == "deadlock"
+    assert r["answered_count"] == 2
+    assert r["requires_judge"] is True
 
-def test_magi_orchestrator_degrades_when_one_role_fails():
-    async def fake_call(endpoint, model, messages, **kwargs):
-        if model == "bad-model":
+
+def test_one_unit_insufficient_quorum():
+    magi = [
+        {"ok": True, "role": "melchior", "label": "M", "stance": "APPROVE", "answer": "solo", "confidence": 0.6},
+        {"ok": False, "role": "balthasar", "label": "B", "stance": "ERROR", "error": "x"},
+        {"ok": False, "role": "casper", "label": "C", "stance": "ERROR", "error": "y"},
+    ]
+    assert agreement_state(magi) == "insufficient"
+    r = vote_resolution(magi)
+    assert r["agreement"] == "insufficient"
+    assert "INSUFFICIENT" in r["final"]
+
+
+# --------------------------------------------------------------------------- #
+# Debate (one real peer-review round)
+# --------------------------------------------------------------------------- #
+def test_debate_changes_a_stance():
+    async def call(endpoint, model, messages, **kwargs):
+        pt = kwargs.get("prompt_type", "")
+        if pt.startswith("magi-debate"):
+            return good("APPROVE", "Convinced by peers.", "Peer evidence changed my mind.", 0.8)
+        if model == "m-c":
+            return good("REJECT", "Block.", "Edge cases.", 0.7)
+        return good("APPROVE", "Ship.", "Fine.", 0.85)
+
+    result = run(call, mode="debate")
+    skeptic = unit(result["magi"], "m-c")
+    assert skeptic["stance"] == "APPROVE"
+    assert skeptic["debated"] is True
+    assert skeptic["original_stance"] == "REJECT"
+    assert result["agreement"] == "unanimous"
+    assert result["resolution"] == "debate_vote"
+
+
+def test_debate_failure_retains_round_one():
+    async def call(endpoint, model, messages, **kwargs):
+        pt = kwargs.get("prompt_type", "")
+        if pt.startswith("magi-debate") and model == "m-c":
+            raise RuntimeError("debate offline")
+        if pt.startswith("magi-debate"):
+            return good("APPROVE", "Hold.", "Stable.", 0.8)
+        if model == "m-c":
+            return good("CONDITIONAL", "Guard it.", "Needs a backup.", 0.6)
+        return good("APPROVE", "Ship.", "Fine.", 0.85)
+
+    result = run(call, mode="debate")
+    skeptic = unit(result["magi"], "m-c")
+    assert skeptic["stance"] == "CONDITIONAL"  # round-one verdict retained
+    assert skeptic["debate_status"] == "malfunction"
+    assert skeptic.get("debated") is False
+
+
+# --------------------------------------------------------------------------- #
+# Judge synthesis
+# --------------------------------------------------------------------------- #
+def test_judge_success():
+    async def call(endpoint, model, messages, **kwargs):
+        if kwargs.get("prompt_type", "").startswith("magi-judge"):
+            return json.dumps({
+                "verdict": "CONDITIONAL",
+                "final": "Proceed after backup.",
+                "agreement_summary": "All cautious.",
+                "dissent_summary": "None material.",
+            })
+        return good("CONDITIONAL", "After backup.", "Risk of loss.", 0.7)
+
+    result = run(call, mode="judge")
+    assert result["resolution"] == "judge"
+    assert result["judge"]["verdict"] == "CONDITIONAL"
+    assert result["decision"] == "CONDITIONAL"
+    assert result["judge_error"] is None
+
+
+def test_judge_failure_falls_back_to_vote():
+    async def call(endpoint, model, messages, **kwargs):
+        if kwargs.get("prompt_type", "").startswith("magi-judge"):
+            raise RuntimeError("judge offline")
+        return good("APPROVE", "Ship.", "Fine.", 0.8)
+
+    result = run(call, mode="judge")
+    assert result["resolution"] == "vote_fallback"
+    assert result["degraded"] is True
+    assert result["vote"]["winner"] == "APPROVE"
+    assert result["judge_error"]
+
+
+def test_parse_judge_response_strict():
+    parsed = parse_judge_response(
+        '{"verdict":"approve","final":"go","agreement_summary":"aligned","dissent_summary":"none"}'
+    )
+    assert parsed["verdict"] == "APPROVE"
+    assert parsed["final"] == "go"
+    with pytest.raises(MagiParseError):
+        parse_judge_response('{"verdict":"approve","final":"go"}')  # missing summaries
+
+
+# --------------------------------------------------------------------------- #
+# Isolation + progress events
+# --------------------------------------------------------------------------- #
+def test_one_provider_timeout_does_not_abort_others():
+    async def call(endpoint, model, messages, **kwargs):
+        if model == "m-b":
             raise RuntimeError("provider timeout")
-        return '{"stance":"APPROVE","confidence":80,"answer":"Proceed with guardrails.","risks":[]}'
+        return good("APPROVE", "Proceed.", "Fine.", 0.8)
 
-    targets = [
-        {"endpoint": "http://local/v1/chat/completions", "model": "good-a", "headers": {}, "endpoint_id": "a", "endpoint_name": "A"},
-        {"endpoint": "http://local/v1/chat/completions", "model": "bad-model", "headers": {}, "endpoint_id": "b", "endpoint_name": "B"},
-        {"endpoint": "http://local/v1/chat/completions", "model": "good-c", "headers": {}, "endpoint_id": "c", "endpoint_name": "C"},
-    ]
-    result = asyncio.run(MagiOrchestrator(fake_call).deliberate("ship?", targets, mode="vote", timeout_seconds=10))
+    result = run(call)
     assert result["degraded"] is True
     assert result["agreement"] == "unanimous"
     assert result["vote"]["winner"] == "APPROVE"
-    assert [item["status"] for item in result["magi"]].count("failed") == 1
+    assert sum(1 for u in result["magi"] if not u["ok"]) == 1
+    assert sum(1 for u in result["magi"] if u["ok"]) == 2
 
 
-def test_magi_orchestrator_judge_falls_back_to_vote():
-    async def fake_call(endpoint, model, messages, **kwargs):
-        if kwargs.get("prompt_type") == "magi-judge":
-            raise RuntimeError("judge offline")
-        return '{"stance":"CONDITIONAL","confidence":70,"answer":"Do it after backup.","risks":["rollback"]}'
+def test_progress_events_arrive_before_final_resolution():
+    events = []
 
-    targets = [
-        {"endpoint": "http://local/v1/chat/completions", "model": "a", "headers": {}, "endpoint_id": "a", "endpoint_name": "A"},
-        {"endpoint": "http://local/v1/chat/completions", "model": "b", "headers": {}, "endpoint_id": "b", "endpoint_name": "B"},
-        {"endpoint": "http://local/v1/chat/completions", "model": "c", "headers": {}, "endpoint_id": "c", "endpoint_name": "C"},
-    ]
-    result = asyncio.run(MagiOrchestrator(fake_call).deliberate("deploy?", targets, mode="judge", timeout_seconds=10))
-    assert result["resolution"] == "vote_fallback"
-    assert result["degraded"] is True
-    assert result["vote"]["winner"] == "CONDITIONAL"
+    async def cb(event):
+        events.append(event)
+
+    async def call(endpoint, model, messages, **kwargs):
+        return good("APPROVE")
+
+    targets = [target("m-a", "a"), target("m-b", "b"), target("m-c", "c")]
+    asyncio.run(
+        MagiOrchestrator(call).deliberate(
+            "ship?", targets, mode="vote", timeout_seconds=10, event_callback=cb
+        )
+    )
+
+    assert events, "expected progress events"
+    assert events[-1]["type"] == "resolved"
+    first_delib = next(i for i, e in enumerate(events)
+                       if e.get("type") == "unit" and e.get("phase") == "deliberating")
+    resolved_idx = next(i for i, e in enumerate(events) if e["type"] == "resolved")
+    assert first_delib < resolved_idx
+    # Every unit announced a final answered/malfunction phase before resolution.
+    answered = [e for e in events if e.get("type") == "unit" and e.get("phase") in {"answered", "malfunction"}]
+    assert len(answered) == 3

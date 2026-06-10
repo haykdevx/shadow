@@ -103,7 +103,29 @@ The player is **YouTube-backed** and engineered to survive YouTube's anti-bot me
 - The frontend uses one persistent `<audio>` element (playback survives minimizing the window) and the **Media Session API** so laptop media keys & lock-screen controls work.
 
 ### Account-owned device companion
-Open **Command**, create a single-use setup code, and run the generated command on Linux, macOS, or Windows. The installed `companion/relay_agent.py` starts at login and long-polls Shadow over HTTPS, so the PC needs no inbound port. Device credentials are stored hashed on the server; device lists, jobs, pending approvals, audit events, and Telegram commands are owner-scoped. The older Tailscale home-agent URL remains only as a migration adapter for `SHADOW_PC_OWNER`.
+Open **Command**, create a single-use setup code, and run the generated command on Linux, macOS, or Windows. Linux/macOS install `companion/relay_agent.py`; Windows installs a native PowerShell/.NET relay with no Python, pip, Node, admin rights, or third-party dependencies. The agent starts at login and long-polls Shadow over HTTPS, so the PC needs no inbound port. Device credentials are stored hashed on the server; the Windows copy is additionally protected locally with DPAPI. Device lists, jobs, pending approvals, audit events, and Telegram commands are owner-scoped. The older Tailscale home-agent URL remains only as a migration adapter for `SHADOW_PC_OWNER`.
+
+### Interactive Remote Desktop
+Enable the optional `remote` Docker profile to add browser-based screen control powered by MeshCentral. Shadow provisions a separate restricted MeshCentral identity and device group per account, encrypts the per-user credential at rest, and launches the embedded console with a three-minute login token. MeshCentral terminal and file access are disabled; those capabilities stay behind Shadow's existing approval gates. The service binds to loopback and is published only as same-origin `/remote/` through the TLS reverse proxy.
+
+### MAGI deliberation engine
+**MAGI** runs one query through three independent units — **MELCHIOR・01** (Scientist), **BALTHASAR・02** (Guardian), **CASPER・03** (Skeptic) — each backed by its own endpoint/model, then resolves their verdicts into a single answer. It is text-only and entirely additive: when MAGI is disabled the normal chat path is untouched.
+
+**Strict structured contract.** Provider output is untrusted until it parses into the verdict schema; arbitrary prose is never accepted as a successful vote.
+```json
+{ "stance": "APPROVE|REJECT|CONDITIONAL", "answer": "...", "confidence": 0.0,
+  "reason": "...", "risks": [], "dissent": "", "next_step": "" }
+```
+`confidence` is normalized to `0..1` (percentages are coerced); a malformed response triggers **exactly one** repair re-ask with the exact schema, and if it still fails the unit is marked **MALFUNCTION** and excluded from voting. Parsing/validation lives in `src/magi_deliberation.py` (pure, fully unit-tested).
+
+**Concurrent, resilient orchestration** (`src/magi_orchestrator.py`): units run in parallel with a per-unit timeout; one provider failing or timing out never aborts the others (the result is reported `degraded`). Resolution modes:
+- **VOTE** — `unanimous` / `majority` (>½ of valid units) / `deadlock` / `insufficient` (1 valid) / `malfunction` (0 valid); the majority answer is selected and dissent is listed.
+- **DEBATE** — one real peer-review round where each unit re-evaluates against its peers, then a re-vote on the revised verdicts. A failed debate round cleanly retains the unit's round-one verdict.
+- **JUDGE** — a synthesis pass that fuses the valid verdicts into one decisive answer while explicitly reporting agreement and dissent. A deadlock auto-escalates to the judge only when ≥2 valid units exist; judge failure falls back to the vote without destroying unit results.
+
+**Streaming.** `POST /api/magi/deliberate/stream` (SSE over a streaming `fetch`) emits independent `unit` → `peer_review`/`judge` `system` → `resolved` events, so each node updates the instant it answers instead of waiting for the slowest model. A client disconnect cancels any unfinished work. Exactly one user message and one final assistant message are persisted per deliberation; provider keys/headers are never exposed. The legacy non-streaming `POST /api/magi/deliberate` is retained. The backend enforces per-user endpoint/model visibility and rejects explicitly selected hidden/nonexistent models, while **auto** mode maximizes distinct endpoint/model assignments across the three units (`routes/magi_routes.py`).
+
+**NERV interface** (`static/js/magi.js` + the MAGI theme in `static/style.css`): a near-black amber-terminal sub-theme with a triangular three-node layout (stacked on mobile) around a central bilingual verdict readout — `DELIBERATING / 審議中`, `APPROVED / 可決`, `REJECTED / 否決`, `MALFUNCTION / 停止` — color-coded green/red/amber by stance, with `UNANIMOUS · MAJORITY · DEADLOCK · DEGRADED` status, CSS-only scanlines and corner ticks, expandable per-unit answers, and `prefers-reduced-motion` support. Confidence is rendered as a percentage while the backend stays on the `0..1` scale.
 
 ### Deployment
 - **Docker Compose**, single command. The image (`python:3.12-slim`) bundles Node, Deno, `tmux`, `gosu`, and OpenSSH; the entrypoint drops to `PUID/PGID` (default `1000:1000`) and repairs bind-mount ownership.
@@ -195,6 +217,7 @@ All runtime configuration lives in `.env` (copy from `.env.example`). Common key
 | `SHADOW_ADMIN_USER` / `SHADOW_ADMIN_PASSWORD` | pre-seed the first-boot admin |
 | `ALLOWED_ORIGINS` | comma-separated allowed origins for cookies/CORS |
 | `SHADOW_PC_OWNER` + `SHADOW_HOME_AGENT_*` | optional legacy single-device migration adapter |
+| `SHADOW_MESH_*` | optional account-isolated MeshCentral Remote Desktop profile |
 | `SHADOW_TELEGRAM_BOT_TOKEN` | enables the account-scoped Telegram remote and web inbox |
 | `MUSIC_COOKIES_FILE` | path to the YouTube cookies file (default `data/music/cookies.txt`) |
 
