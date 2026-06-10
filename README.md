@@ -111,6 +111,38 @@ Enable the optional `remote` Docker profile to add browser-based screen control 
 ### MAGI deliberation engine
 **MAGI** runs one query through three independent units — **MELCHIOR・01** (Scientist), **BALTHASAR・02** (Guardian), **CASPER・03** (Skeptic) — each backed by its own endpoint/model, then resolves their verdicts into a single answer. It is text-only and entirely additive: when MAGI is disabled the normal chat path is untouched.
 
+```
+   Browser (SPA)                         Shadow app — MAGI
+  ┌──────────────────────┐      ┌───────────────────────────────────────────────┐
+  │ magi.js · NERV UI     │ POST │ routes/magi_routes.py                          │
+  │  MELCHIOR-01          │ query│  ├─ require_user + per-user model visibility   │
+  │  BALTHASAR-02         │─────▶│  ├─ POST /api/magi/deliberate/stream   (SSE)   │
+  │  CASPER-03            │      │  └─ POST /api/magi/deliberate          (legacy)│
+  │  central verdict      │      └───────────────────────┬───────────────────────┘
+  └──────────────────────┘                              │ event_callback
+        ▲                                                ▼
+        │ SSE events                 ┌───────────────────────────────────────────┐
+        │ unit · peer_review ·       │ src/magi_orchestrator.py                   │
+        │ judge · resolved           │  concurrent fan-out · per-unit timeout ·   │
+        │                            │  malfunction isolation                     │
+        │                            └───────┬───────────┬───────────┬───────────┘
+        │                                    │           │           │
+        │                             MELCHIOR-01   BALTHASAR-02   CASPER-03
+        │                             Scientist     Guardian       Skeptic
+        │                             model A        model B        model C
+        │                                    │           │           │
+        │                                    └─────┬─────┴─────┬─────┘
+        │                                          ▼           ▼
+        │                          src/magi_deliberation.py — strict verdict schema
+        │                          parse → one repair re-ask → else MALFUNCTION
+        │                                          │
+        │                                          ▼
+        │                          resolve · VOTE / DEBATE (peer round) / JUDGE
+        │                          unanimous · majority · deadlock · degraded
+        └──────────────────────────────────────────┘
+                       streamed verdict + expandable per-unit answers
+```
+
 **Strict structured contract.** Provider output is untrusted until it parses into the verdict schema; arbitrary prose is never accepted as a successful vote.
 ```json
 { "stance": "APPROVE|REJECT|CONDITIONAL", "answer": "...", "confidence": 0.0,
