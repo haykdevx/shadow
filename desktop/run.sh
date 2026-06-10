@@ -15,7 +15,14 @@ fi
 
 if [ ! -d "$VENV" ]; then
   echo "[shadow-desktop] creating launcher venv…"
-  "$PY" -m venv "$VENV"
+  # On Linux, pywebview's GTK backend uses the system 'gi' (PyGObject) module,
+  # which is installed system-wide via apt and is not pip-installable into an
+  # isolated venv — so expose system packages there. Harmless on macOS.
+  VENV_FLAGS=""
+  if [ "$(uname -s)" = "Linux" ]; then
+    VENV_FLAGS="--system-site-packages"
+  fi
+  "$PY" -m venv $VENV_FLAGS "$VENV"
   "$VENV/bin/pip" install --quiet --upgrade pip
   "$VENV/bin/pip" install --quiet -r "$HERE/requirements-desktop.txt"
 fi

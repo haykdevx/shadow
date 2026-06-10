@@ -1,0 +1,59 @@
+name: shadow-workspace
+title: Shadow
+base: core24
+version: '1.0.0'
+summary: Private self-hosted AI workspace
+description: |
+  Shadow is a private, self-hosted personal AI workspace for a single operator:
+  chat, autonomous agents, MAGI tri-model deliberation, long-term memory, deep
+  research, a productivity suite, and a music player. The desktop app runs the
+  same Docker stack as the server deployment locally, so every feature behaves
+  identically.
+
+  NOTE: this app orchestrates the host's Docker Engine, so it ships with
+  `classic` confinement. Classic snaps require manual approval before they can
+  be released on the Snap Store / Ubuntu Software. Docker must be installed on
+  the host. For a strictly-confined, store-friendly build, use the native
+  (no-Docker) variant instead — see packaging/README.md.
+
+grade: stable
+confinement: classic
+
+apps:
+  shadow:
+    command: bin/shadow-launch
+    desktop: usr/share/applications/io.github.haykdevx.shadow.desktop
+
+parts:
+  launcher:
+    plugin: python
+    source: ../..
+    python-packages:
+      - pywebview>=5.0
+    stage-packages:
+      - python3-gi
+      - gir1.2-webkit2-4.1
+      - libgtk-3-0
+    organize:
+      desktop/launcher.py: bin/launcher.py
+    override-build: |
+      craftctl default
+      install -d "$CRAFT_PART_INSTALL/bin"
+      cat > "$CRAFT_PART_INSTALL/bin/shadow-launch" <<'EOS'
+      #!/bin/sh
+      exec python3 "$SNAP/bin/launcher.py" "$@"
+      EOS
+      chmod +x "$CRAFT_PART_INSTALL/bin/shadow-launch"
+
+  metadata:
+    plugin: dump
+    source: ../linux
+    organize:
+      shadow.desktop: usr/share/applications/io.github.haykdevx.shadow.desktop
+      io.github.haykdevx.shadow.metainfo.xml: usr/share/metainfo/io.github.haykdevx.shadow.metainfo.xml
+  icons:
+    plugin: dump
+    source: ../../desktop/assets
+    organize:
+      icon-256.png: usr/share/icons/hicolor/256x256/apps/io.github.haykdevx.shadow.png
+      icon-512.png: usr/share/icons/hicolor/512x512/apps/io.github.haykdevx.shadow.png

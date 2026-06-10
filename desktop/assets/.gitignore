@@ -1,0 +1,2 @@
+# Icon assets must be tracked despite the repo-wide *.png ignore.
+!*.png

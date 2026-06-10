@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for Ubuntu Software / GNOME Software / KDE Discover. -->
+<component type="desktop-application">
+  <id>io.github.haykdevx.shadow</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Shadow</name>
+  <summary>Private self-hosted AI workspace</summary>
+
+  <description>
+    <p>
+      Shadow is a private, self-hosted personal AI workspace for a single
+      operator: chat, autonomous agents, MAGI tri-model deliberation, long-term
+      memory, deep research, a productivity suite (mail, calendar, notes, tasks,
+      documents), and a music player. The desktop app runs the same stack as the
+      server deployment locally, so every feature behaves identically.
+    </p>
+    <p>Highlights:</p>
+    <ul>
+      <li>Chat with any local model or API (Ollama, llama.cpp, OpenAI, OpenRouter, …)</li>
+      <li>Agents that run real tools (web, files, shell, skills, memory) via MCP</li>
+      <li>MAGI — tri-model deliberation with vote, debate, and judge modes</li>
+      <li>Memory, deep research, and a full productivity suite</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.haykdevx.shadow.desktop</launchable>
+
+  <categories>
+    <category>Network</category>
+    <category>Utility</category>
+    <category>Development</category>
+  </categories>
+
+  <keywords>
+    <keyword>AI</keyword>
+    <keyword>assistant</keyword>
+    <keyword>agent</keyword>
+    <keyword>MAGI</keyword>
+    <keyword>LLM</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/haykdevx/dev</url>
+  <url type="bugtracker">https://github.com/haykdevx/dev/issues</url>
+
+  <developer id="io.github.haykdevx">
+    <name>haykdevx</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="1.0.0" date="2026-06-10">
+      <description>
+        <p>First desktop release: native launcher, MAGI streaming, serpent emblem.</p>
+      </description>
+    </release>
+  </releases>
+</component>

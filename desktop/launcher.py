@@ -170,6 +170,26 @@ def wait_for_health(timeout: int, on_status=None) -> bool:
 # --------------------------------------------------------------------------- #
 # Splash + error pages (shown in the native window before the app is ready)
 # --------------------------------------------------------------------------- #
+# The Shadow serpent emblem (96px PNG), embedded so the splash needs no assets.
+EMBLEM_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAABYlBMVEUHCAoHCAkGBwkGBggEBAUEBQYAAAABAQECAgIDAwMEBAQFBQUICAkVFh"
+    "g6PEISEhMaGxwNDg8lJikMDAxYWFhnZmdkZGREREQVFRUTExOCgoKYmJjo6Ojs7O2wsLCBgYJ5eHkgICAqKiuoqKh+fX4dHR0BAAEuLi7X19gs"
+    "LCwPDw8KCgohISFlZWUrKysICAgQEBB+fn7x8fL7+/zn5+jt7e7l5ebx8fGGhYaRkZGEhIVaWlqIiIhTU1MtLS05OTmEhIT///+Pj5CAgICQj5"
+    "B3d3eBgYG7u7yysrPDw8Svr7AnJyd3d3jc3N18fHzCwsPS0tLT09S9vb2ioqOJiYnp6enBwMHGxsYWFhYtLS5KSUo3NjdpaWqOjo5mZmbw8PHh"
+    "4eKHh4hgYGB9fX1/f4C5ubk1NDURERFGRkaOjY7Hx8j09PSmpqdZWVk+Pj5KSkpAQEAeHh5ubW4cHBwLCwsODg4Vs/qwAAAC4klEQVRo3u2Z51"
+    "fUQBDAz4Pb2c3ZEbFwWBAbKiLYCyAoxd4VFXvv7f83JBdMQmZms8V7T2/euw/3bjO/adnbnalU2tIWR7KiUnUsocqMVF2bXM1/7eisOZTOjhyh"
+    "WqkJp1L7HwEgpVJBKEopCY4BIFUQam2qheirAlcAKLYYQgg4AIR6UDXhb9ISAIGiYx0geE2AYtTja7QAMmCLJfayIE46AB3z0ZUaADR/BSKD0g"
+    "Coa4XnT5hyyzkABCW0xw5nCQygvP48gQHUy+sPCfoAvfLMS8ZtEqBK1E9a0rVEAaR2/eclZRkFMEjw8kcJgFkCYoEl53GASYWmgpRYhwM4/Yx/"
+    "yeMoAPgM11dSAMkAuAysWi3WrKUcVDSAdWDdemZBMwsYQFmUUMYFDMCXEGsBCdBIMStxEBCAfYQSIxGA1UuWiRHmAfdweDxlt9oAB7hIQTPOxQ"
+    "BJWweia0P3xp5NnJcSBXA53rxla2+jbxsDAFMAiO07xM7+XQNC7SbXKRxAei727N23f/DAwUNDzNuGA+gqPTx8ZKQxevTY8d4Tg+TCwAigxMlT"
+    "A92nz5w9NzY+cV5ID4DJkakLF6dnZucuXb5C+moGEKLr6rXrN27eun3nbs89wxAx79n9B/MPw9j0P3q8QIaIqCKiOkAMN0afPO1bePb8xUvSDj"
+    "ADiKFXr9+8ffd+4sPHT3SZEgB6q/j85ev8NzH2/YegdxRiq2A2u5+/ILKd2U+JzY4uI4g+kv1TIrbrv/CHY3hwzzhKAbz/6buIUawCPXhZx4g5"
+    "eNkd3iMH6KOj1fUjFSEcYH5BiyV5S8wvIBxAcADvVyi7S+CSda28xvq/iJdqRaUlbVlrmyGG7ZzMQ61uSHlvqRV0+WhZ1kNsfVtT+G/M+m8tL4"
+    "ZJI9cWzXGh0d5Xdu39CEEOKLDfyo1YCmcprkYsTWXR6Ck1JFIOh0QJZFFrPOaSzsdc5eVfBHge93ofWPsfubelLebyG8sftbVFcVtaAAAAAElF"
+    "TkSuQmCC"
+)
+
+
 def _page(title_en: str, title_jp: str, detail: str, spinner: bool) -> str:
     spin = (
         '<div class="spin"></div>' if spinner else '<div class="err">!</div>'
@@ -179,7 +199,9 @@ def _page(title_en: str, title_jp: str, detail: str, spinner: bool) -> str:
   html,body{{margin:0;height:100%;background:#07080a;color:#e8d8b0;
     font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;}}
   .wrap{{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;}}
-  .mark{{color:#ffb000;letter-spacing:.32em;font-size:13px;}}
+  .emblem{{width:88px;height:88px;image-rendering:auto;
+    filter:drop-shadow(0 0 14px rgba(255,176,0,.28));}}
+  .mark{{color:#ffb000;letter-spacing:.32em;font-size:12px;}}
   .en{{font-size:22px;font-weight:800;letter-spacing:.18em;color:#ffb000;}}
   .jp{{font-size:13px;opacity:.8;color:#ffb000;}}
   .detail{{font-size:12px;color:#8a7c5f;min-height:16px;text-align:center;padding:0 24px;}}
@@ -189,6 +211,7 @@ def _page(title_en: str, title_jp: str, detail: str, spinner: bool) -> str:
     display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;}}
   @keyframes spin{{to{{transform:rotate(360deg)}}}}
 </style></head><body><div class="wrap">
+  <img class="emblem" alt="Shadow" src="data:image/png;base64,{EMBLEM_B64}">
   <div class="mark">SHADOW</div>{spin}
   <div class="en">{title_en}</div><div class="jp">{title_jp}</div>
   <div class="detail" id="detail">{detail}</div>

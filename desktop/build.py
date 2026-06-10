@@ -45,8 +45,13 @@ def main() -> int:
         windowed,
         # The env template ships inside the bundle so a fresh machine can seed .env.
         "--add-data", f"{HERE / 'shadow-desktop.env.example'}{_sep()}.",
-        str(LAUNCHER),
     ]
+    # Platform app icon from the serpent emblem.
+    icon = {"win32": HERE / "assets" / "shadow.ico",
+            "darwin": HERE / "assets" / "shadow.icns"}.get(sys.platform)
+    if icon and icon.exists():
+        cmd += ["--icon", str(icon)]
+    cmd.append(str(LAUNCHER))
     print("[build]", " ".join(cmd))
     proc = subprocess.run(cmd, cwd=HERE)
     if proc.returncode == 0:

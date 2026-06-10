@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Shadow
+GenericName=AI Workspace
+Comment=Private self-hosted AI workspace — chat, agents, MAGI, memory, research
+Exec=__EXEC__
+Icon=io.github.haykdevx.shadow
+Terminal=false
+Categories=Network;
+Keywords=AI;assistant;chat;agent;MAGI;LLM;workspace;
+StartupNotify=true
+StartupWMClass=Shadow
