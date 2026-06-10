@@ -418,50 +418,10 @@ def run_gui(base: list[str]) -> int:
         WINDOW_TITLE, html=SPLASH_HTML, width=1280, height=860, min_size=(900, 600),
         js_api=_DesktopApi(),
     )
-
-    # Performance overlay injected into every loaded page. In the WebKitGTK
-    # software-rendering path, backdrop-filter blurs and the animated background
-    # patterns repaint the whole window every frame and cause the lag. Killing
-    # those (and snapping transitions) makes the UI feel smooth without an image
-    # rebuild — it takes effect on relaunch only.
-    import json as _json
-    _perf_css = (
-        "*,*::before,*::after{backdrop-filter:none!important;"
-        "-webkit-backdrop-filter:none!important;}"
-        "body[class*='bg-pattern']{animation:none!important;background-attachment:scroll!important;}"
-        "body[class*='bg-pattern']::before,body[class*='bg-pattern']::after{animation:none!important;}"
-        "*{transition-duration:120ms!important;}"
-    )
-
-    # Floating "Browser" button that launches the Chromium window via the API.
-    _fab_js = (
-        "(function(){if(!document.body||document.getElementById('shadow-browser-fab'))return;"
-        "var b=document.createElement('button');b.id='shadow-browser-fab';b.title='Open browser';"
-        "b.innerHTML='\\u{1F310}';"
-        "b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;width:46px;height:46px;"
-        "border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(20,24,32,.92);"
-        "color:#fff;font-size:20px;line-height:46px;cursor:pointer;padding:0;box-shadow:0 4px 14px rgba(0,0,0,.4)';"
-        "b.onclick=function(){try{window.pywebview.api.open_browser('');}catch(e){}};"
-        "document.body.appendChild(b);})();"
-    )
-
-    def _inject_perf(*_a) -> None:
-        js = (
-            "(function(){if(document.getElementById('shadow-perf'))return;"
-            "var s=document.createElement('style');s.id='shadow-perf';"
-            "s.textContent=" + _json.dumps(_perf_css) + ";"
-            "(document.head||document.documentElement).appendChild(s);})();"
-        )
-        try:
-            window.evaluate_js(js)
-            window.evaluate_js(_fab_js)
-        except Exception:
-            pass
-
-    try:
-        window.events.loaded += _inject_perf
-    except Exception:
-        pass
+    # NOTE: the app enforces a strict CSP, so runtime evaluate_js injection is
+    # refused. The Browser entry and the desktop perf CSS are baked into the app
+    # (sidebar item + html.desktop-app styles), gated on window.pywebview — see
+    # static/js/browserLauncher.js. The page calls window.pywebview.api.open_browser.
 
     def worker() -> None:
         try:

@@ -35583,3 +35583,20 @@ body.theme-frosted .modal {
   .music-bar-track, .music-bar-right { width: auto; }
   .music-bar-right { display: none; }
 }
+
+/* ===================== DESKTOP APP (pywebview/WebKitGTK) ===================== */
+/* The <html> gets .desktop-app only inside the native desktop app. WebKitGTK's
+   software-rendering path is slow with backdrop blur and the animated
+   background patterns, so disable just those there for a smooth UI. The web
+   build is unaffected. */
+html.desktop-app *,
+html.desktop-app *::before,
+html.desktop-app *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.desktop-app body[class*="bg-pattern"],
+html.desktop-app body[class*="bg-pattern"]::before,
+html.desktop-app body[class*="bg-pattern"]::after {
+  animation: none !important;
+}

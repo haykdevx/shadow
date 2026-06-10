@@ -12,6 +12,7 @@ import searchModule from './js/search.js';
 import chatModule from './js/chat.js';
 import compareModule from './js/compare/index.js';
 import magiModule from './js/magi.js';
+import browserLauncherModule from './js/browserLauncher.js';
 import musicModule from './js/music.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
@@ -3429,6 +3430,7 @@ function startShadowApp() {
   chatModule.init(API_BASE);
   chatModule.initListeners();
   magiModule.init(API_BASE);
+  browserLauncherModule.init();
   musicModule.init(API_BASE);
   groupModule.init(API_BASE);
   // Initialize compare module
