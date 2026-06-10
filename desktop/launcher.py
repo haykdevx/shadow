@@ -399,8 +399,24 @@ def run_gui(base: list[str]) -> int:
         )
 
     _brand_process()
+
+    class _DesktopApi:
+        """Bridge exposed to the page as window.pywebview.api."""
+        def open_browser(self, url: str = "") -> bool:
+            # Launch the Chromium browser as a separate process so its Qt loop
+            # doesn't collide with pywebview's GTK loop. sys.executable is the
+            # launcher venv's python (which has PyQt6-WebEngine).
+            try:
+                browser_py = str(Path(__file__).resolve().parent / "browser.py")
+                subprocess.Popen([sys.executable, browser_py, url or ""])
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log(f"failed to open browser: {exc}")
+                return False
+
     window = webview.create_window(
         WINDOW_TITLE, html=SPLASH_HTML, width=1280, height=860, min_size=(900, 600),
+        js_api=_DesktopApi(),
     )
 
     # Performance overlay injected into every loaded page. In the WebKitGTK
@@ -417,6 +433,18 @@ def run_gui(base: list[str]) -> int:
         "*{transition-duration:120ms!important;}"
     )
 
+    # Floating "Browser" button that launches the Chromium window via the API.
+    _fab_js = (
+        "(function(){if(!document.body||document.getElementById('shadow-browser-fab'))return;"
+        "var b=document.createElement('button');b.id='shadow-browser-fab';b.title='Open browser';"
+        "b.innerHTML='\\u{1F310}';"
+        "b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;width:46px;height:46px;"
+        "border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(20,24,32,.92);"
+        "color:#fff;font-size:20px;line-height:46px;cursor:pointer;padding:0;box-shadow:0 4px 14px rgba(0,0,0,.4)';"
+        "b.onclick=function(){try{window.pywebview.api.open_browser('');}catch(e){}};"
+        "document.body.appendChild(b);})();"
+    )
+
     def _inject_perf(*_a) -> None:
         js = (
             "(function(){if(document.getElementById('shadow-perf'))return;"
@@ -426,6 +454,7 @@ def run_gui(base: list[str]) -> int:
         )
         try:
             window.evaluate_js(js)
+            window.evaluate_js(_fab_js)
         except Exception:
             pass
 
