@@ -23,6 +23,7 @@ from src import shadow_devices
 from src.mission_policy import (
     ALLOW,
     DENY,
+    MODES,
     ActionRequest,
     Decision,
     MissionPolicyError,
@@ -89,7 +90,7 @@ def create_workspace(owner: str, device_id: str, root: str, name: str = "",
     root_canonical = canonicalize_path(root)
     if not root_canonical or root_canonical in (".", "/", ".."):
         raise WorkspaceError("Workspace root must be a concrete folder")
-    if mode not in ("ask", "auto", "full"):
+    if mode not in MODES:
         raise WorkspaceError("Unknown permission mode")
     row = {
         "id": secrets.token_urlsafe(9),
@@ -136,7 +137,7 @@ def get_workspace(owner: str, workspace_id: str) -> dict[str, Any]:
 
 
 def set_workspace_mode(owner: str, workspace_id: str, mode: str) -> dict[str, Any]:
-    if mode not in ("ask", "auto", "full"):
+    if mode not in MODES:
         raise WorkspaceError("Unknown permission mode")
     row = get_workspace(owner, workspace_id)
     with _LOCK:
@@ -256,6 +257,7 @@ def build_request(owner: str, workspace: dict[str, Any], action: str,
         command=command,
         path=primary_path,
         mission_id=mission_id,
+        detail={"workspace_root": root},
     )
 
 

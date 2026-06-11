@@ -23,6 +23,15 @@ Permission modes (Codex-style):
   immutable audit record. Even in full mode, structurally prohibited
   operations (cross-user/cross-device access, paths outside the device
   agent's allowed roots) remain DENY.
+- ``unattended`` — persistent per-workspace autonomy. The engine never
+  returns REQUIRE_APPROVAL: workspace reads, edits, project commands,
+  dependency installation, network access, and safe git operations are
+  ALLOW; everything on the hard deny-list (privilege escalation, power
+  control, security settings, destructive root-level filesystem operations,
+  destructive git, credentials/secrets paths not explicitly covered by the
+  workspace root, Shadow's own credential files, cross-tenant access,
+  paths outside the authorized roots) is a concise DENY the agent can adapt
+  to. The mode is stored on the workspace record, so it survives restarts.
 
 Approval grants are scoped: ``once`` (consumed by the next matching action),
 ``mission``, ``session``, or ``workspace`` (a persistent, revocable rule).
@@ -48,7 +57,7 @@ ALLOW = "ALLOW"
 REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
 DENY = "DENY"
 
-MODES = ("ask", "auto", "full")
+MODES = ("ask", "auto", "full", "unattended")
 DEFAULT_MODE = "auto"
 
 GRANT_SCOPES = ("once", "mission", "session", "workspace")
@@ -599,6 +608,44 @@ _READ_CAPS = {"fs_read", "git_read"}
 # Capabilities mode `auto` runs without asking, inside the workspace.
 _AUTO_CAPS = _READ_CAPS | {"fs_write", "shell", "git_write"}
 
+# Rule ids that stay a hard DENY in unattended mode. Everything else inside
+# the workspace runs without asking. Routine recursive deletes (`rm -rf dist`)
+# are intentionally NOT here: they are everyday build hygiene and deletes go
+# through the recoverable workspace trash; only root-level/device destruction,
+# privilege escalation, power control, security settings, and destructive git
+# remain denied.
+_UNATTENDED_DENY_RULES = frozenset({
+    # destructive at machine level
+    "rm-recursive-root", "mkfs", "dd-device", "format-cmd", "diskpart",
+    "shred", "truncate-dev",
+    # privilege escalation (cannot run non-interactively under the agent)
+    "sudo", "doas", "su-root", "runas", "uac-start", "pkexec",
+    # power control
+    "shutdown", "reboot", "halt-poweroff", "systemctl-power", "pmset",
+    # security settings
+    "firewall", "users", "passwd", "auth-config", "service-mgmt",
+    "registry", "launchctl", "csrutil",
+    # destructive git (`git reset --hard` is never allowed to an agent)
+    "git-force-push", "git-reset-hard", "git-clean-force",
+    "git-branch-delete-force", "git-push-delete", "git-filter",
+})
+
+
+def _workspace_root_covers_secret(request: ActionRequest, path_rule: str) -> bool:
+    """True when the workspace root itself sits inside the same secret class.
+
+    A user who explicitly authorized e.g. ``~/.aws`` as a workspace has made
+    that decision once; flagging every file inside it again would make the
+    workspace unusable. Shadow's own credential files are never covered.
+    """
+    if path_rule == "shadow-data":
+        return False
+    root = str(request.detail.get("workspace_root") or "")
+    if not root:
+        return False
+    root_hit = classify_path(root)
+    return bool(root_hit and root_hit[0] == path_rule)
+
 
 def evaluate(
     request: ActionRequest,
@@ -657,6 +704,29 @@ def evaluate(
         if not full_access_active(request.owner, request.device_id):
             return Decision(DENY, "Full access is not armed for this device (reauthenticate)", rule="full-not-armed")
         return Decision(ALLOW, "full access armed", rule="full-access", grant_key=grant_key)
+
+    # ── unattended mode: ALLOW or a concise DENY — never an approval ──
+    if mode == "unattended":
+        if request.outside_roots:
+            return Decision(DENY, "Path is outside the authorized workspace", rule="outside-roots")
+        denied = next(((rule, reason) for rule, reason in flags
+                       if rule in _UNATTENDED_DENY_RULES), None)
+        if denied:
+            return Decision(
+                DENY, f"Not available in unattended mode: {denied[1]}",
+                rule=f"unattended-deny:{denied[0]}",
+            )
+        if capability == "credentials":
+            path_hit = classify_path(request.path) if request.path else None
+            if path_hit and _workspace_root_covers_secret(request, path_hit[0]):
+                return Decision(ALLOW, "workspace root explicitly covers this location",
+                                rule="unattended-root-covered", grant_key=grant_key)
+            return Decision(
+                DENY, f"Touches sensitive data ({flag_text or 'credentials'}); "
+                      "not available in unattended mode",
+                rule="unattended-credentials",
+            )
+        return Decision(ALLOW, "unattended mode", rule="unattended", grant_key=grant_key)
 
     # ── shared hard gates for ask/auto ──
     if request.outside_roots:

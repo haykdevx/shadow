@@ -355,7 +355,7 @@ def create_mission(
     if not goal or len(goal) < 8:
         raise MissionError("A mission needs a real goal")
     workspace = mission_workspaces.get_workspace(owner, workspace_id)  # owner check
-    if mode not in ("ask", "auto", "full"):
+    if mode not in mission_policy.MODES:
         raise MissionError("Unknown permission mode")
     roles = roles if isinstance(roles, dict) else {}
     cleaned_roles = {}
