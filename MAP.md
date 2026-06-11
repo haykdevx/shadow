@@ -133,6 +133,12 @@ Verified integration points this subsystem builds on (do not duplicate them):
 - **Durable state**: missions, workspaces, policy rules, and the audit log
   live under `data/missions/` using the `core/atomic_io` JSON pattern (same
   family as `data/shadow-devices.json`); no SQL schema changes.
+- **Agent sessions**: `src/agent_sessions.py` is the direct (no-DAG)
+  conversational tool loop for simple tasks; it reuses the exact
+  `mission_workspaces.dispatch` → policy → relay path, the mission
+  checkpoint contract, and the `endpoint_resolver`/`llm_core` model path.
+  The `unattended` workspace mode lives in `mission_policy.evaluate`
+  (ALLOW/DENY only — REQUIRE_APPROVAL is unreachable in that mode).
 - **Frontend**: `static/js/missionsPage.js` follows the `commandPage.js`
   full-page module pattern (`openPage`/`closePage`, route in `app.py` +
   `static/app.js` `_routeOpen`, sidebar button in `static/index.html`).

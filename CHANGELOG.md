@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Agent Sessions & Unattended mode
+
+- Added **Agent Sessions**: a direct, conversational tool loop (no planner
+  DAG) for everyday coding tasks — pick a workspace and a model, type the
+  task, and watch the live activity timeline, terminal output, changed-file
+  diffs, and final report; follow-up messages continue in context, with
+  Stop / Resume / Retry / Rollback controls.
+- Added the persistent **Unattended** permission mode: per-workspace, never
+  asks for approval — project edits, commands, tests, package installation,
+  network access, and safe git run immediately while privilege escalation,
+  destructive git, secrets paths, and anything outside the workspace are
+  refused with a concise error. Survives restarts; persistent UI indicator
+  with one-click disable.
+- Provider failures now preserve the session as failed + retryable with the
+  provider error shown, optional automatic fallback to other configured
+  models, and one-action retry on another model.
+- Added a live end-to-end check (`scripts/e2e_agent_workspace_check.py`)
+  covering the full workspace contract incl. unattended execution, escape
+  rejection, and rollback against a real server + relay agent.
+- `SHADOW_AUTH_PATH` can now point isolated test instances at their own
+  account store.
+
 ### Product identity
 
 - Rebranded the visible workspace, login, companion identity, and PWA metadata

@@ -1,6 +1,6 @@
 # Shadow
 
-**Shadow is a private, self-hosted personal AI workspace for a single operator** — chat, autonomous agents, voice, long-term memory, deep research, a full productivity suite (mail, calendar, notes, tasks, documents), a free music player, and explicitly-approved control of a linked Linux PC. It runs on a VPS and reaches your home machine only over a private Tailscale link.
+**Shadow is a private, self-hosted personal AI workspace for a single operator** — chat, autonomous agents, voice, long-term memory, deep research, a full productivity suite (mail, calendar, notes, tasks, documents), a free music player, and explicitly-approved control of your linked Linux, macOS, or Windows PCs. It runs on a VPS while each account-owned device connects outbound over HTTPS with no inbound home-network port.
 
 Shadow is a fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus). The upstream MIT license and acknowledgments are preserved.
 
@@ -8,7 +8,7 @@ Shadow is a fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus)
 
 ## Why Shadow
 
-Most self-hosted AI projects stop at a chat box. Shadow is built as a private **command center**: the assistant can reason, remember, research, deliberate across multiple models (MAGI), run real tools, and — only through explicit approvals — control a linked Linux PC. It is designed for one serious operator first, then packaged so contributors can safely run it in demo mode.
+Most self-hosted AI projects stop at a chat box. Shadow is built as a private **command center**: the assistant can reason, remember, research, deliberate across multiple models (MAGI), run real tools, and — only through explicit approvals — control account-owned Linux, macOS, and Windows PCs. It is designed for one serious operator first, then packaged so contributors can safely run it in demo mode.
 
 ---
 
@@ -38,7 +38,7 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 - The account-owned device agent connects outbound over HTTPS; it opens no home-router port. Destructive actions remain server- and device-gated behind explicit confirmation.
 - **Telegram inbox + remote** — pair one Telegram identity to one Shadow account. Bot chats appear inside Shadow and commands can control only that account's enrolled PCs.
 - **Agent browser** — a real per-account Chromium (Playwright) the agent and you share: persistent isolated profile, Command-page panel with live capture, Telegram `/browse`, optional MAGI evidence source. Risky actions (payments, sends, posts, deletes, secret-field fills, raw JS) stop server-side and wait for your explicit approval.
-- **Autonomous Missions + Desktop Workspace** — authorize a project folder on your own PC, give Shadow a goal, and it plans a task DAG, assigns your configured models to planner/researcher/implementer/reviewer/tester roles, edits real files, runs tests, and reports — under Codex-style permission modes (*Ask for approval* / *Approve for me* / password-armed *Full access*) enforced by a server-side policy engine and re-checked by the device agent. Checkpoints before any edit; one-action rollback. See [AUTONOMOUS_MISSIONS.md](AUTONOMOUS_MISSIONS.md).
+- **Agent Sessions + Autonomous Missions + Desktop Workspace** — authorize a project folder on your own PC and either run a direct **Agent Session** (pick a model, type a task, watch it inspect and edit the real files with a live activity timeline, terminal output, changed-file diffs, and follow-up messages in context) or a multi-stage **Mission** (planned task DAG across planner/researcher/implementer/reviewer/tester roles). Both run under Codex-style permission modes (*Ask for approval* / *Approve for me* / persistent **Unattended** / password-armed *Full access*) enforced by a server-side policy engine and re-checked by the device agent. Checkpoints before any edit; one-click rollback. See [AUTONOMOUS_MISSIONS.md](AUTONOMOUS_MISSIONS.md).
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 

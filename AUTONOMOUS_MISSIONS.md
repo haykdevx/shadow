@@ -3,15 +3,17 @@
 Shadow's autonomous engineering workspace: open a local project on one of
 your own machines, give Shadow a goal, and let it inspect, edit, test, and
 manage real files — with every action decided by a server-side policy engine
-and re-checked by the device agent. Works on Windows, Linux, and macOS via
-the Python device agent; nothing on the device is ever exposed to the
-internet.
+and re-checked by the device agent. Linux and macOS use the Python relay;
+Windows uses the dependency-free native PowerShell/.NET relay. Every device
+connects outbound over HTTPS and opens no inbound port.
 
-- UI: **Missions** in the sidebar (route `/missions`).
+- UI: **Missions** in the sidebar (route `/missions`) — Agent Sessions,
+  Missions, and the Desktop Workspace share the page.
 - Backend: `src/mission_policy.py`, `src/mission_workspaces.py`,
-  `src/mission_engine.py`, `routes/mission_routes.py`.
-- Device: `companion/workspace_agent.py` (dispatched through the existing
-  outbound relay; installed automatically by the device installers).
+  `src/mission_engine.py`, `src/agent_sessions.py`, `routes/mission_routes.py`.
+- Device: `companion/workspace_agent.py` on Linux/macOS and the matching
+  native implementation in `companion/shadow-device.ps1` on Windows,
+  dispatched through the same outbound relay protocol.
 - State: `data/missions/` (atomic JSON documents — no SQL schema changes,
   hence no database migrations; this matches the established
   `data/shadow-devices.json` pattern).
@@ -82,6 +84,31 @@ transition. On startup, `recover_missions()` marks orphaned running
 missions `paused` and resets in-flight tasks to `ready`; Resume continues
 the plan.
 
+### Agent Sessions (direct, no planner DAG)
+
+Simple coding/file tasks should not pay for an oversized planner. An **Agent
+Session** (`src/agent_sessions.py`) is one model + one workspace + one
+conversational JSON tool loop: pick a device/workspace, pick any configured
+model, type the task, press Run. The model immediately inspects and edits the
+real files through the exact same policy-checked dispatch path missions use.
+
+The session view shows a chronological activity timeline, live terminal
+output (command, exit code, stdout/stderr), the changed-file list with
+per-file revert, a unified diff viewer, and the final factual report.
+Follow-up messages join the same conversation — mid-run they are queued and
+drained between steps; after completion they continue the session in context.
+Stop, Resume, Retry, and Rollback are one click each.
+
+Safety is identical to missions: a checkpoint opens automatically before the
+first mutation, deletes are soft (workspace trash), every file read/changed
+and command executed is recorded durably, and sessions interrupted by a
+restart are recovered as `stopped` + retryable — never stranded `running`.
+
+Provider failures are session state, not crashes: the provider error is
+shown verbatim, the record is preserved as `failed` + retryable, **Retry with
+another model** is one action, and when *automatic fallback* is enabled the
+session rotates to the next configured fallback model by itself.
+
 ### Desktop Workspace
 
 The same policy-checked path powers a desktop-style explorer per
@@ -98,15 +125,28 @@ enrolled device for one account.
 Selected per workspace, shown beside every mission; the modal supports
 ↑/↓ + Enter + Escape with the current mode highlighted.
 
-| | `ask` — Ask for approval | `auto` — Approve for me (default) | `full` — Full access |
-|---|---|---|---|
-| Read / inspect workspace | allowed | allowed | allowed |
-| Edit files in workspace | ask | allowed | allowed |
-| Ordinary project commands | ask | allowed | allowed |
-| Network access | ask | ask (unless granted for the mission) | allowed |
-| Outside the workspace | ask | ask | allowed **within device roots** |
-| Destructive / privileged / installers / secrets / security settings | ask | **ask** | allowed |
-| Cross-user / cross-device | DENY | DENY | **DENY** |
+| | `ask` — Ask for approval | `auto` — Approve for me (default) | `unattended` — Unattended | `full` — Full access |
+|---|---|---|---|---|
+| Read / inspect workspace | allowed | allowed | allowed | allowed |
+| Edit files in workspace | ask | allowed | allowed | allowed |
+| Ordinary project commands | ask | allowed | allowed | allowed |
+| Dependency installation | ask | ask | **allowed** | allowed |
+| Network access | ask | ask (unless granted for the mission) | **allowed** | allowed |
+| Outside the workspace | ask | ask | **DENY** (no prompt) | allowed **within device roots** |
+| Privilege escalation / power / security settings / destructive git / secrets | ask | **ask** | **DENY** (no prompt) | allowed |
+| Cross-user / cross-device | DENY | DENY | DENY | **DENY** |
+
+`unattended` is the persistent autonomy mode: the policy engine never
+returns REQUIRE_APPROVAL for it — everything is either an immediate ALLOW or
+a concise DENY the model adapts to. It is enabled once per workspace,
+stored on the workspace record (survives restarts), indicated by a
+persistent UNATTENDED banner, and disabled with one click. The hard deny
+list is not negotiable: paths outside the workspace/`SHADOW_ALLOWED_ROOTS`,
+symlink/traversal escapes, cross-account access, privilege escalation,
+power control, security settings, destructive git (`reset --hard`, force
+push, `clean -fd`, history rewrites), root-level filesystem destruction,
+credentials/secrets paths (unless the workspace root itself is that
+directory), and Shadow's own credential files.
 
 `full` requires password reauthentication, is never on by default, takes an
 optional time limit (15 min–8 h, default 1 h), shows a persistent
@@ -191,32 +231,24 @@ are estimates.
 
 ## Device agent setup
 
-The workspace needs the **Python device agent** (`relay_agent.py` +
-`home_agent.py` + `workspace_agent.py`). Devices enrolled before this
-feature: re-run the installer (or drop `workspace_agent.py` next to the
-agent) and restart it; the agent then advertises `ws_*` capabilities.
+Command generates a one-line, account-scoped installer for every supported OS.
+Devices enrolled before workspace support should run the installer's repair/update
+path once so they advertise the `ws_*` and `git_*` capabilities.
 
-- **Linux**: Command → Add device → run the one-line installer. Installs to
-  `~/.local/share/shadow-device`, runs as a systemd user service
-  (`shadow-device.service`).
-- **macOS**: same one-liner; installs to
-  `~/Library/Application Support/Shadow/device-agent`, runs via launchd
-  (`io.shadow.device`).
-- **Windows**: the default one-liner installs the dependency-free
-  PowerShell agent, which supports PC control but **not** workspaces. For
-  workspaces install Python 3.10+ and run the Python agent:
-  ```powershell
-  mkdir $env:LOCALAPPDATA\ShadowDevice; cd $env:LOCALAPPDATA\ShadowDevice
-  curl.exe -O https://YOUR-SHADOW/api/shadow/device/source/relay_agent.py
-  curl.exe -O https://YOUR-SHADOW/api/shadow/device/source/home_agent.py
-  curl.exe -O https://YOUR-SHADOW/api/shadow/device/source/workspace_agent.py
-  $env:SHADOW_ALLOWED_ROOTS="C:\Users\you\Projects"
-  python relay_agent.py --server https://YOUR-SHADOW --enroll CODE --name "My PC"
-  python relay_agent.py   # keep running (Task Scheduler / NSSM for autostart)
-  ```
-- **Every OS**: set `SHADOW_ALLOWED_ROOTS` (path-separator-joined list) on
-  the device to the outermost folders Shadow may ever touch. Workspaces
-  must live inside it; it defaults to your home directory — narrow it.
+- **Linux**: installs the Python relay to `~/.local/share/shadow-device` and
+  runs it as the enabled systemd user service `shadow-device.service`.
+- **macOS**: installs the same Python relay to
+  `~/Library/Application Support/Shadow/device-agent` and runs it through
+  the `io.shadow.device` launch agent.
+- **Windows 10/11**: installs the native PowerShell 5.1/.NET relay. It has
+  the same workspace, git, command, checkpoint, and rollback contract and
+  requires no Python, pip, Node, package manager, administrator rights, or
+  third-party runtime. The enrollment token is protected with current-user
+  DPAPI and the relay starts through HKCU Run (Startup-folder fallback).
+- **Every OS**: `SHADOW_ALLOWED_ROOTS` is the device-local outer boundary.
+  The default is the current user's home/profile directory; narrow it for
+  shared machines. Every job also carries one explicit workspace root, and
+  the device requires the path to be inside both boundaries.
 
 ## API specification
 
@@ -232,6 +264,13 @@ All routes under `/api/missions`, interactive cookie session required
 | `POST /policy/grants` | Record a user decision: `{grant_key, scope: once\|mission\|session\|workspace, workspace_id, mission_id, summary}` |
 | `GET /policy/rules`, `DELETE /policy/rules/{id}` | List / revoke persistent rules |
 | `POST /policy/full-access` | Arm: `{device_id, password, duration_seconds?}` |
+| `GET/POST /sessions` | List / create+start an agent session: `{workspace_id, task, endpoint_id, model, fallbacks?, auto_fallback?}` |
+| `GET /sessions/{id}` | Full session record (timeline, terminal, files, report) |
+| `POST /sessions/{id}/message` | Follow-up message (queued mid-run; restarts a finished session in context) |
+| `POST /sessions/{id}/stop\|resume` | Stop / resume |
+| `POST /sessions/{id}/retry` | Retry, optionally `{endpoint_id, model}` to switch models |
+| `POST /sessions/{id}/rollback` | `{paths?}` — per-file or full rollback |
+| `POST /sessions/{id}/approvals/{aid}` | `{decision: allow_once\|allow_session\|allow_always\|decline\|stop_session}` |
 | `GET/DELETE /policy/full-access/{device_id}` | Status / disarm |
 | `GET /models` | Configured `{endpoint_id, models[]}` pairs + role names |
 | `POST /` (missions) | Create + plan: `{workspace_id, goal, mode, allow_network, roles{role: {endpoint_id, model}}}` |
@@ -246,10 +285,38 @@ ws_hash, ws_diff, ws_write, ws_mkdir, ws_rename, ws_delete, ws_patch,
 ws_run, git_info, git_log, git_diff, git_commit, git_checkout,
 ws_checkpoint, ws_restore`.
 
-## Test report (2026-06-11)
+## Test report (2026-06-12)
 
-- Full suite: **1037 passed, 2 skipped, 0 failed** (903 before this
-  feature; **+134 new tests**, all green; chat/MAGI/devices untouched).
+- Full suite: **1112 passed, 2 skipped, 0 failed** (1041 before the
+  unattended/agent-session work; **+71 new tests**, all green).
+  - `tests/test_unattended_mode.py` (45): every project-work class allowed
+    without asking; every hard-deny class (privilege escalation, power,
+    security settings, root-level destruction, destructive git, secrets,
+    Shadow credentials, outside-roots, cross-tenant) denied without a
+    prompt; REQUIRE_APPROVAL proven unreachable; workspace-root-covers-
+    secret nuance; persistence across registry reloads; dispatch-level
+    allow/deny integration.
+  - `tests/test_agent_sessions.py` (18): full loop to completion with
+    checkpoint-before-mutation ordering, terminal recording, malformed-JSON
+    repair, unknown-tool rejection, policy-denial adaptation, provider
+    failure → failed+retryable, auto-fallback rotation, opt-in-only
+    fallback, retry on another model, follow-up context continuity,
+    stop/resume, rollback, crash recovery, cross-user isolation.
+  - `tests/test_mission_routes_auth.py` (+15 cases): anonymous 401 and
+    API-token/agent-identity 403 on every session route.
+- Earlier mission-suite coverage (described below) is unchanged and green.
+- Live end-to-end (`scripts/e2e_agent_workspace_check.py` — real uvicorn
+  server, real Linux relay agent, dedicated temporary workspace, isolated
+  account store): **33/33** — tree/read/write/patch on disk, command exit
+  codes, checkpoint → rollback restoring pre-images and removing created
+  files, relative/absolute path-escape rejection, symlink escape stopped by
+  the device agent's realpath check, cross-account workspace and device
+  authorization rejected, installer-class command running with **no
+  approval in unattended mode** while the identical command in `auto` mode
+  returns an approval card, `sudo rm -rf /` denied without a prompt, and a
+  complete agent session against a scripted OpenAI-compatible endpoint that
+  wrote a real file through the relay, ran a verification command, reported,
+  and was rolled back.
   - `tests/test_mission_policy.py` (52): all three modes, session-grant
     expiry, dangerous-command and secrets detection, internet-access
     gating, cross-user grant scoping, full-access arming/expiry/audit,
@@ -288,8 +355,7 @@ ws_checkpoint, ws_restore`.
 
 ## Known limitations
 
-- The dependency-free Windows PowerShell agent does not implement
-  workspace actions (use the Python agent on Windows, above).
+- Windows workspace execution depends on built-in PowerShell 5.1; git actions additionally require Git when the selected folder is a Git repository. File edits, commands, checkpoints, and rollback do not require Git.
 - Mission token counts are estimates (chars/4) — providers' usage fields
   are not yet aggregated.
 - `researcher` works repo-locally; it has no web access (the agent browser
