@@ -25,6 +25,7 @@ esac
 mkdir -p "$BASE"
 curl -fsSL "$SERVER/api/shadow/device/source/relay_agent.py" -o "$BASE/relay_agent.py"
 curl -fsSL "$SERVER/api/shadow/device/source/home_agent.py" -o "$BASE/home_agent.py"
+curl -fsSL "$SERVER/api/shadow/device/source/workspace_agent.py" -o "$BASE/workspace_agent.py" || true
 python3 -m pip install --user -q psutil >/dev/null 2>&1 || true
 python3 "$BASE/relay_agent.py" --server "$SERVER" --enroll "$CODE" --name "$NAME" --once
 

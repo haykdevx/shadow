@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from src.auth_helpers import require_user
@@ -52,6 +53,13 @@ from src.shadow_pc import (
     timeline,
     watchdog,
 )
+from src.shadow_remote import (
+    ShadowRemoteError,
+    create_invite as create_remote_invite,
+    create_session as create_remote_session,
+    list_remote_devices,
+    status as remote_status,
+)
 from src.shadow_telegram_store import list_chats, mark_read, messages, owns_chat, record_message
 
 
@@ -90,6 +98,7 @@ class DeviceEnrollRequest(BaseModel):
     name: str = Field(default="", max_length=100)
     hostname: str = Field(default="", max_length=100)
     platform: str = Field(default="Unknown", max_length=100)
+    agent_version: str = Field(default="", max_length=40)
     capabilities: list[str] = Field(default_factory=list, max_length=100)
 
 
@@ -97,6 +106,7 @@ class DevicePollRequest(BaseModel):
     timeout: float = Field(default=25, ge=1, le=30)
     name: str = Field(default="", max_length=100)
     platform: str = Field(default="", max_length=100)
+    agent_version: str = Field(default="", max_length=40)
     capabilities: list[str] = Field(default_factory=list, max_length=100)
 
 
@@ -139,10 +149,14 @@ def _origin(request: Request) -> str:
 
 def _setup_commands(origin: str, code: str) -> dict[str, str]:
     linux = f"curl -fsSL {origin}/api/shadow/device/install/unix | bash -s -- --server {origin} --code {code}"
-    windows = (
-        f"$i=irm '{origin}/api/shadow/device/install/windows'; "
-        f"& ([scriptblock]::Create($i)) -Server '{origin}' -Code '{code}'"
+    ps_origin = origin.replace("'", "''")
+    ps_code = code.replace("'", "''")
+    script = (
+        f"& curl.exe --fail --show-error --silent --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 2 '{ps_origin}/api/shadow/device/install/windows' -o $env:TEMP\\shadow-install.ps1;"
+        "if($LASTEXITCODE -ne 0){throw 'Installer download failed.'};"
+        f"& $env:TEMP\\shadow-install.ps1 -Server '{ps_origin}' -Code '{ps_code}'"
     )
+    windows = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "{script}"'
     return {"linux": linux, "macos": linux, "windows": windows}
 
 
@@ -193,6 +207,34 @@ def setup_shadow_routes() -> APIRouter:
         except ShadowDeviceError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @router.get("/remote/status")
+    def shadow_remote_status(request: Request):
+        user = _real_user(request)
+        payload = remote_status(user)
+        if payload["configured"] and payload["account_ready"]:
+            try:
+                payload["devices"] = list_remote_devices(user)
+            except ShadowRemoteError as exc:
+                payload["devices"] = []
+                payload["warning"] = str(exc)
+        else:
+            payload["devices"] = []
+        return payload
+
+    @router.post("/remote/setup")
+    def shadow_remote_setup(request: Request):
+        try:
+            return create_remote_invite(_real_user(request))
+        except ShadowRemoteError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @router.post("/remote/session")
+    def shadow_remote_session(request: Request):
+        try:
+            return create_remote_session(_real_user(request))
+        except ShadowRemoteError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
     # Backward-compatible read endpoint. It no longer exposes grants or requests.
     @router.get("/access")
     def shadow_access(request: Request):
@@ -212,7 +254,7 @@ def setup_shadow_routes() -> APIRouter:
     def shadow_device_poll(payload: DevicePollRequest, request: Request):
         device = _device_from_request(request)
         try:
-            touch_device(device["id"], {"name": payload.name, "platform": payload.platform, "capabilities": payload.capabilities})
+            touch_device(device["id"], {"name": payload.name, "platform": payload.platform, "agent_version": payload.agent_version, "capabilities": payload.capabilities})
             job = poll_job(device, payload.timeout)
             return {"ok": True, "job": job}
         except ShadowDeviceError as exc:
@@ -236,7 +278,22 @@ def setup_shadow_routes() -> APIRouter:
 
     @router.get("/device/source/{filename}", response_class=PlainTextResponse)
     def shadow_device_source(filename: str):
-        allowed = {"relay_agent.py": BASE_DIR / "companion" / "relay_agent.py", "home_agent.py": BASE_DIR / "companion" / "home_agent.py"}
+        agent_path = BASE_DIR / "companion" / "shadow-device.ps1"
+        if filename == "shadow-device.ps1.gz":
+            if not agent_path.exists():
+                raise HTTPException(404, "Source file not found")
+            payload = gzip.compress(agent_path.read_bytes(), compresslevel=9)
+            return Response(
+                content=payload,
+                media_type="application/gzip",
+                headers={"Cache-Control": "no-store"},
+            )
+        allowed = {
+            "relay_agent.py": BASE_DIR / "companion" / "relay_agent.py",
+            "home_agent.py": BASE_DIR / "companion" / "home_agent.py",
+            "workspace_agent.py": BASE_DIR / "companion" / "workspace_agent.py",
+            "shadow-device.ps1": agent_path,
+        }
         path = allowed.get(filename)
         if not path or not path.exists():
             raise HTTPException(404, "Source file not found")

@@ -120,6 +120,7 @@ def _public_device(row: dict[str, Any], *, selected: bool = False) -> dict[str, 
         "owner": row.get("owner"),
         "name": row.get("name") or "Shadow device",
         "platform": row.get("platform") or "Unknown",
+        "agent_version": row.get("agent_version") or None,
         "transport": row.get("transport") or "relay",
         "created_at": row.get("created_at"),
         "last_seen": last_seen or None,
@@ -164,6 +165,7 @@ def enroll_device(code: str, metadata: dict[str, Any] | None = None) -> dict[str
             "owner": owner,
             "name": str(metadata.get("name") or metadata.get("hostname") or "Shadow device").strip()[:100],
             "platform": str(metadata.get("platform") or "Unknown").strip()[:100],
+            "agent_version": str(metadata.get("agent_version") or "").strip()[:40],
             "transport": "relay",
             "created_at": now,
             "last_seen": now,
@@ -207,6 +209,8 @@ def touch_device(device_id: str, metadata: dict[str, Any] | None = None) -> dict
             row["name"] = str(metadata["name"]).strip()[:100]
         if metadata.get("platform"):
             row["platform"] = str(metadata["platform"]).strip()[:100]
+        if metadata.get("agent_version"):
+            row["agent_version"] = str(metadata["agent_version"]).strip()[:40]
         if isinstance(metadata.get("capabilities"), list):
             row["capabilities"] = [str(value)[:60] for value in metadata["capabilities"] if isinstance(value, str)][:100]
         _save(DEVICES_PATH, state)
@@ -305,6 +309,9 @@ def dispatch_action(
         raise ShadowDeviceError("Device is offline. Start the Shadow device service on that PC.")
     job_id = secrets.token_urlsafe(16)
     now = time.time()
+    # Workspace commands (tests, builds) legitimately run for minutes; the
+    # agent caps execution at 600s, so the relay wait may match it.
+    wait = max(5, min(float(timeout), 620))
     with _LOCK, _file_lock(JOBS_PATH):
         state = _job_state()
         state["jobs"][job_id] = {
@@ -316,10 +323,10 @@ def dispatch_action(
             "confirmed": bool(confirmed),
             "status": "queued",
             "created_at": now,
-            "expires_at": now + max(5, min(float(timeout), 60)),
+            "expires_at": now + wait,
         }
         _save(JOBS_PATH, state)
-    deadline = time.time() + max(5, min(float(timeout), 60))
+    deadline = time.time() + wait
     while time.time() < deadline:
         time.sleep(0.25)
         with _LOCK:

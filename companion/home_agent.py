@@ -778,6 +778,12 @@ def _volume(percent: int) -> dict[str, Any]:
 
 def execute_action(action: str, args: Any = None, *, confirmed: bool = False) -> dict[str, Any]:
     action = str(action or "").strip().lower()
+    if action.startswith(("ws_", "git_")):
+        try:
+            from companion.workspace_agent import execute_workspace_action
+        except ImportError:  # standalone install: files sit side by side
+            from workspace_agent import execute_workspace_action
+        return execute_workspace_action(action, args, confirmed=confirmed)
     if action not in ALL_ACTIONS:
         raise HomeAgentError(f"Unsupported action: {action or '(missing)'}")
     if action in WRITE_ACTIONS and not confirmed:

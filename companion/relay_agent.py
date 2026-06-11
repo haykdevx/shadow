@@ -24,6 +24,14 @@ try:
 except ImportError:  # Standalone installer places both files together.
     from home_agent import ALL_ACTIONS, HomeAgentError, execute_action
 
+try:  # Workspace actions are optional: older installs simply lack them.
+    from companion.workspace_agent import WS_ALL_ACTIONS
+except ImportError:
+    try:
+        from workspace_agent import WS_ALL_ACTIONS
+    except ImportError:
+        WS_ALL_ACTIONS = frozenset()
+
 
 def _config_path() -> Path:
     system = platform.system()
@@ -64,7 +72,7 @@ def _metadata(name: str = "") -> dict[str, Any]:
         "name": name.strip() or socket.gethostname() or "Shadow device",
         "hostname": socket.gethostname(),
         "platform": platform.platform(),
-        "capabilities": sorted(ALL_ACTIONS),
+        "capabilities": sorted(ALL_ACTIONS | WS_ALL_ACTIONS),
     }
 
 
