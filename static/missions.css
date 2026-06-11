@@ -1,0 +1,122 @@
+/* Autonomous Missions + Desktop Workspace page (scoped under .missions-page) */
+.missions-page{position:fixed;inset:0;z-index:60;background:var(--color-bg,#0a0c10);color:var(--color-fg,#dbe3ee);overflow:auto}
+.missions-inner{max-width:1500px;margin:0 auto;padding:18px 22px 60px}
+.missions-top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}
+.missions-kicker{font:11px ui-monospace,"JetBrains Mono",monospace;letter-spacing:.18em;opacity:.6}
+.missions-top h2{margin:2px 0 4px;font-size:22px}
+.missions-top p{margin:0;opacity:.65;font-size:13px}
+.missions-top-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.missions-close{background:none;border:1px solid rgba(255,255,255,.18);color:inherit;border-radius:8px;width:30px;height:30px;cursor:pointer}
+.missions-layout{display:grid;grid-template-columns:330px 1fr;gap:14px}
+@media (max-width:980px){.missions-layout{grid-template-columns:1fr}}
+.missions-panel{border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;margin-bottom:12px;background:var(--color-panel,rgba(255,255,255,.03))}
+.missions-panel h4{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+.missions-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);color:inherit;border-radius:8px;padding:7px 11px;font-size:12.5px;cursor:pointer}
+.missions-btn:hover{background:rgba(255,255,255,.12)}
+.missions-btn.primary{background:var(--color-accent,#22d3ee);border-color:transparent;color:#04222b;font-weight:600}
+.missions-btn.danger{border-color:rgba(255,99,99,.5);color:#ff8a8a}
+.missions-btn.small{padding:4px 8px;font-size:11.5px}
+.missions-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 6px;border-bottom:1px solid rgba(255,255,255,.06)}
+.missions-row[data-selected="1"]{background:rgba(34,211,238,.08);border-radius:8px}
+.missions-row strong{display:block;font-size:12.5px}
+.missions-row small{display:block;opacity:.6;font-size:11px;word-break:break-all}
+.missions-row-actions{display:flex;gap:4px;flex-shrink:0}
+.missions-empty{opacity:.55;font-size:12.5px;padding:10px 4px}
+.missions-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:200;background:#10331f;border:1px solid #2c7a4b;color:#9ff0bd;padding:9px 16px;border-radius:10px;font-size:13px}
+.missions-toast[data-kind="error"]{background:#3a1212;border-color:#a14040;color:#ffb3b3}
+#missions-composer textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.14);color:inherit;border-radius:8px;padding:8px;font-size:13px;resize:vertical}
+.missions-role{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin:5px 0;gap:8px;text-transform:capitalize}
+.missions-role select{max-width:200px;background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:4px}
+.missions-checkbox{display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0;opacity:.85}
+.missions-mode-row{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;margin:8px 0}
+/* modal */
+.missions-modal-overlay{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px}
+.missions-modal{background:var(--color-bg,#0d1117);border:1px solid rgba(255,255,255,.16);border-radius:14px;padding:18px;max-width:620px;width:100%;max-height:85vh;overflow:auto}
+.missions-modal h3{margin:0 0 4px}
+.missions-modal-hint{opacity:.6;font-size:12px;margin:0 0 12px}
+.missions-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+.missions-mode-option{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:11px;margin-bottom:8px;cursor:pointer}
+.missions-mode-option[data-selected="1"]{border-color:var(--color-accent,#22d3ee);background:rgba(34,211,238,.08);outline:2px solid rgba(34,211,238,.35)}
+.missions-mode-title{font-weight:600;font-size:13.5px;display:flex;gap:8px;align-items:center}
+.missions-mode-body{opacity:.7;font-size:12px;margin-top:4px;line-height:1.45}
+.missions-badge{font:10px ui-monospace,monospace;border-radius:999px;padding:2px 8px;border:1px solid rgba(255,255,255,.2)}
+.missions-badge[data-kind="ok"]{color:#7ee8b0;border-color:rgba(57,217,138,.4)}
+.missions-badge[data-kind="danger"],.missions-badge[data-kind="failed"]{color:#ff8a8a;border-color:rgba(255,99,99,.4)}
+.missions-badge[data-kind="current"]{color:#9ecbff;border-color:rgba(110,168,254,.4)}
+.missions-badge[data-kind="done"]{color:#7ee8b0;border-color:rgba(57,217,138,.4)}
+.missions-badge[data-kind="running"]{color:#ffd479;border-color:rgba(255,196,87,.45)}
+.missions-badge[data-kind="blocked"]{color:#ffae5e;border-color:rgba(255,150,60,.4)}
+/* full access banner */
+.missions-full-banner{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:300;background:#3a1212;border:1px solid #c14747;border-radius:0 0 10px 10px;color:#ffc1c1;padding:6px 16px;font:600 12px ui-monospace,monospace;display:flex;gap:12px;align-items:center}
+.missions-full-banner button{background:none;border:1px solid #c14747;color:#ffc1c1;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}
+/* mission detail */
+.missions-detail-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap}
+.missions-detail-head h3{margin:0;font-size:16px}
+.missions-detail-head small{opacity:.65}
+.missions-detail-actions{display:flex;gap:6px;flex-wrap:wrap}
+.missions-tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.12);margin:10px 0}
+.missions-tabs button{background:none;border:none;color:inherit;opacity:.6;padding:8px 12px;cursor:pointer;font-size:12.5px;text-transform:capitalize;border-bottom:2px solid transparent}
+.missions-tabs button[data-selected="1"]{opacity:1;border-bottom-color:var(--color-accent,#22d3ee)}
+.missions-tab-body h5{margin:16px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;opacity:.7}
+.missions-clarify{border:1px solid rgba(255,196,87,.4);background:rgba(255,196,87,.07);border-radius:10px;padding:11px;margin:8px 0;font-size:13px}
+.missions-clarify-row{display:flex;gap:8px;margin-top:8px}
+.missions-clarify-row input{flex:1;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.16);color:inherit;border-radius:8px;padding:7px}
+/* graph */
+.missions-graph{display:flex;gap:6px;align-items:flex-start;overflow-x:auto;padding:8px 0}
+.missions-graph-col{display:flex;flex-direction:column;gap:8px;min-width:170px}
+.missions-graph-arrow{align-self:center;opacity:.4}
+.missions-node{border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:8px;font-size:12px;background:rgba(255,255,255,.03)}
+.missions-node[data-status="done"]{border-color:rgba(57,217,138,.5)}
+.missions-node[data-status="running"]{border-color:rgba(255,196,87,.6);box-shadow:0 0 10px rgba(255,196,87,.15)}
+.missions-node[data-status="failed"]{border-color:rgba(255,99,99,.55)}
+.missions-node[data-status="blocked"]{border-color:rgba(255,150,60,.5)}
+.missions-node-role{display:inline-block;font:10px ui-monospace,monospace;opacity:.6;text-transform:uppercase}
+.missions-node strong{display:block;margin:2px 0}
+.missions-node small{display:block;opacity:.55;margin-bottom:4px}
+.missions-table{border-collapse:collapse;font-size:12px;margin-top:6px}
+.missions-table th,.missions-table td{border:1px solid rgba(255,255,255,.12);padding:4px 9px;text-align:left}
+.missions-chips{display:flex;gap:6px;flex-wrap:wrap}
+.missions-chip{border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:3px 10px;font-size:11.5px;display:inline-flex;gap:6px;align-items:center}
+.missions-chip button{background:none;border:none;color:#ffae5e;cursor:pointer;padding:0}
+.missions-cmd{display:block;background:rgba(0,0,0,.3);border-radius:6px;padding:5px 9px;margin:4px 0;font-size:11.5px;word-break:break-all}
+.missions-task{border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;margin-bottom:9px;font-size:13px}
+.missions-task-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.missions-task p{margin:6px 0;opacity:.75;font-size:12.5px}
+.missions-task-result{color:#7ee8b0;font-size:12.5px}
+.missions-task-error{color:#ff9c9c;font-size:12.5px}
+.missions-log{display:block;opacity:.55;font-size:11px;margin-top:3px;word-break:break-all}
+.missions-approval{border:1px solid rgba(255,196,87,.45);background:rgba(255,196,87,.06);border-radius:10px;padding:11px;margin-bottom:9px;font-size:13px}
+.missions-approval[data-risk="critical"]{border-color:rgba(255,99,99,.6);background:rgba(255,99,99,.06)}
+.missions-approval strong{display:block}
+.missions-approval small{display:block;opacity:.7;margin:3px 0 6px}
+.missions-approval code{display:block;background:rgba(0,0,0,.35);border-radius:6px;padding:5px 8px;font-size:11.5px;margin-bottom:6px;word-break:break-all}
+.missions-approval-actions{display:flex;gap:6px;flex-wrap:wrap}
+.missions-events{font-size:12px}
+.missions-event{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);align-items:baseline}
+.missions-event span:first-child{opacity:.45;font:11px ui-monospace,monospace;flex-shrink:0}
+.missions-event strong{flex-shrink:0;font-size:11px;text-transform:uppercase;opacity:.75}
+.missions-event em{opacity:.6;font-style:normal;font:11px ui-monospace,monospace}
+.missions-event[data-kind="failed"] strong,.missions-event[data-kind="task_failed"] strong{color:#ff8a8a}
+.missions-event[data-kind="approval_requested"] strong{color:#ffd479}
+.missions-report{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:14px;font-size:13px;line-height:1.55}
+/* explorer */
+.missions-explorer{display:grid;grid-template-columns:290px 1fr;gap:12px;margin-top:10px}
+@media (max-width:900px){.missions-explorer{grid-template-columns:1fr}}
+.missions-explorer-side input[type="text"]{width:100%;box-sizing:border-box;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.15);color:inherit;border-radius:8px;padding:7px;font-size:12.5px}
+.missions-tree{list-style:none;padding-left:12px;margin:6px 0;font-size:12.5px}
+.missions-tree summary{cursor:pointer;opacity:.85;padding:2px 0}
+.missions-file{display:block;background:none;border:none;color:inherit;opacity:.8;cursor:pointer;padding:2px 0;font-size:12.5px;text-align:left;width:100%;word-break:break-all}
+.missions-file:hover{opacity:1;color:var(--color-accent,#22d3ee)}
+.missions-editor-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.missions-editor-actions{display:flex;gap:5px;flex-wrap:wrap}
+#missions-editor{width:100%;box-sizing:border-box;min-height:420px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);color:#d8e2ef;border-radius:10px;padding:10px;font:12.5px ui-monospace,"JetBrains Mono",monospace;line-height:1.5;resize:vertical}
+.missions-git{border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 11px;font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.missions-git pre{max-height:160px;overflow:auto;font-size:11px}
+.missions-output{background:rgba(0,0,0,.4);border-radius:10px;padding:10px;font:11.5px ui-monospace,monospace;max-height:380px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.missions-diff{background:rgba(0,0,0,.4);border-radius:10px;padding:10px;font:11.5px ui-monospace,monospace;max-height:480px;overflow:auto}
+.missions-diff-line{display:block;white-space:pre-wrap;word-break:break-all}
+.missions-diff-line[data-kind="add"]{color:#7ee8b0;background:rgba(57,217,138,.08)}
+.missions-diff-line[data-kind="del"]{color:#ff9c9c;background:rgba(255,99,99,.08)}
+.missions-diff-line[data-kind="hunk"]{color:#9ecbff}
+.missions-diff-line[data-kind="meta"]{opacity:.55}
+body.missions-page-open{overflow:hidden}

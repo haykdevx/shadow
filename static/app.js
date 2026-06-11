@@ -22,6 +22,7 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import commandPageModule from './js/commandPage.js';
+import missionsPageModule from './js/missionsPage.js';
 import telegramModule from './js/telegram.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
@@ -216,8 +217,10 @@ function initializeEventListeners() {
       // like every other page instead of needing the X button.
       const opensTelegram = e.target.closest('#tool-telegram-btn, #rail-telegram');
       const opensCommand = e.target.closest('#tool-command-btn, #rail-command');
+      const opensMissions = e.target.closest('#tool-missions-btn');
       try { if (!opensTelegram) telegramModule?.closePage?.(); } catch (_) {}
       try { if (!opensCommand) commandPageModule?.closePage?.(); } catch (_) {}
+      try { if (!opensMissions) missionsPageModule?.closePage?.(); } catch (_) {}
     }
   });
 
@@ -1015,6 +1018,7 @@ function initializeEventListeners() {
     },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
     '/command':  () => commandPageModule && commandPageModule.openPage({ push: false }),
+    '/missions': () => missionsPageModule && missionsPageModule.openPage({ push: false }),
     '/telegram': () => telegramModule && telegramModule.openPage({ push: false }),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
@@ -3999,6 +4003,7 @@ function startShadowApp() {
   // Ensure proper initial state
   voiceRecorderModule.init();
   commandPageModule.init();
+  missionsPageModule.init();
   telegramModule.init();
   if (censorModule) censorModule.init();
 

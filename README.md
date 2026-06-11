@@ -38,6 +38,7 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 - The account-owned device agent connects outbound over HTTPS; it opens no home-router port. Destructive actions remain server- and device-gated behind explicit confirmation.
 - **Telegram inbox + remote** — pair one Telegram identity to one Shadow account. Bot chats appear inside Shadow and commands can control only that account's enrolled PCs.
 - **Agent browser** — a real per-account Chromium (Playwright) the agent and you share: persistent isolated profile, Command-page panel with live capture, Telegram `/browse`, optional MAGI evidence source. Risky actions (payments, sends, posts, deletes, secret-field fills, raw JS) stop server-side and wait for your explicit approval.
+- **Autonomous Missions + Desktop Workspace** — authorize a project folder on your own PC, give Shadow a goal, and it plans a task DAG, assigns your configured models to planner/researcher/implementer/reviewer/tester roles, edits real files, runs tests, and reports — under Codex-style permission modes (*Ask for approval* / *Approve for me* / password-armed *Full access*) enforced by a server-side policy engine and re-checked by the device agent. Checkpoints before any edit; one-action rollback. See [AUTONOMOUS_MISSIONS.md](AUTONOMOUS_MISSIONS.md).
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 

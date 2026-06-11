@@ -100,3 +100,42 @@ these extension points instead of duplicating working subsystems.
 - Telegram reuses `POST /api/v1/chat` with an owner-scoped chat token rather
   than creating another LLM loop.
 
+## Autonomous Missions, Desktop Workspace, And Permission Policy
+
+Verified integration points this subsystem builds on (do not duplicate them):
+
+- **Device relay**: `src/shadow_devices.py` (`dispatch_action`,
+  `poll_job`/`complete_job`, file-backed job queue, SHA-256 device tokens,
+  owner-scoped lookups) and `routes/shadow_routes.py`
+  (`/api/shadow/device/poll|result|enroll`). Workspace file/git/command
+  actions are new agent actions dispatched through this exact relay; nothing
+  on the device is exposed to the internet.
+- **Device agent**: `companion/home_agent.py` executes allowlisted actions
+  with `SHADOW_ALLOWED_ROOTS` containment; `companion/workspace_agent.py`
+  adds the workspace/git/patch/checkpoint actions and re-enforces root
+  containment with `os.path.realpath` (symlink-escape proof) — defense in
+  depth even against a compromised server. Installers fetch agent files from
+  the allowlist in `routes/shadow_routes.py::shadow_device_source`.
+- **Model providers**: `ModelEndpoint` DB rows; per-user visibility via the
+  pattern in `routes/magi_routes.py::_visible_endpoints`; calls go through
+  `src/llm_core.llm_call_async(url, model, messages, headers=...)`. Mission
+  roles map to `{endpoint_id, model}` pairs — no provider is hardcoded.
+- **Approvals**: missions use durable JSON approvals (mission state must
+  survive restarts), but keep the established contract from
+  `src/shadow_pc.py`/`src/browser_manager.py`: approval endpoints require an
+  interactive cookie (`_real_user`); agent identities and API tokens can
+  never self-approve.
+- **Policy engine**: `src/mission_policy.py` is the single decision point
+  (`ALLOW` / `REQUIRE_APPROVAL` / `DENY`) for every workspace tool call, on
+  top of declared `ActionRequest` capabilities. Models never decide their
+  own permissions; the engine is pure and unit-tested. The device agent
+  independently re-checks roots.
+- **Durable state**: missions, workspaces, policy rules, and the audit log
+  live under `data/missions/` using the `core/atomic_io` JSON pattern (same
+  family as `data/shadow-devices.json`); no SQL schema changes.
+- **Frontend**: `static/js/missionsPage.js` follows the `commandPage.js`
+  full-page module pattern (`openPage`/`closePage`, route in `app.py` +
+  `static/app.js` `_routeOpen`, sidebar button in `static/index.html`).
+- Chat, MAGI, Command, Telegram, devices, and the agent browser are not
+  modified by this subsystem beyond the wiring listed above.
+
