@@ -47,7 +47,25 @@ class _DBStub(types.ModuleType):
 _db = _DBStub("core.database")
 _db.get_db_session = _get_db_session
 _db.ApiToken = _ApiToken
-sys.modules["core.database"] = _db  # overwrite any minimal stub from a sibling test
+# Overwrite whatever is installed (the real ORM module or a sibling stub) so
+# the companion imports below bind to OUR stub — but remember the original and
+# put it back once this module's tests finish. Leaving the catch-all
+# MagicMock module in sys.modules broke every later test that imports
+# core.database at call time (task scheduler, auth migration, ...).
+_PRIOR_CORE_DATABASE = sys.modules.get("core.database")
+sys.modules["core.database"] = _db
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_core_database_after_module():
+    # Re-assert the stub at run time: another module's collection-time setup
+    # may have swapped core.database between our import and our first test.
+    sys.modules["core.database"] = _db
+    yield
+    if _PRIOR_CORE_DATABASE is not None:
+        sys.modules["core.database"] = _PRIOR_CORE_DATABASE
+    else:
+        sys.modules.pop("core.database", None)
 
 for _name, _attrs in {
     "core.auth": {"AuthManager": MagicMock()},

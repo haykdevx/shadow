@@ -6,7 +6,7 @@ from src.topic_analyzer import analyze_topics
 
 def _sm(*messages):
     history = [{"role": "user", "content": c} for c in messages]
-    return SimpleNamespace(sessions={"s1": {"owner": None, "name": "S", "history": history}})
+    return SimpleNamespace(sessions={"s1": {"owner": "alice", "name": "S", "history": history}})
 
 
 def _freq(result):
@@ -16,15 +16,27 @@ def _freq(result):
 def test_substring_does_not_false_match_technology():
     # Regression: "ai" matched inside "email"/"again"/"rain"/"wait", flagging
     # Technology for messages with no technical content at all.
-    result = analyze_topics(_sm("Can you send me an email again about the rain? I will wait."))
+    result = analyze_topics(_sm("Can you send me an email again about the rain? I will wait."), owner="alice")
     assert "Technology" not in _freq(result)
 
 
 def test_real_keywords_still_match():
-    result = analyze_topics(_sm("I wrote some Python code to test the algorithm."))
+    result = analyze_topics(_sm("I wrote some Python code to test the algorithm."), owner="alice")
     assert _freq(result).get("Technology", 0) >= 1
 
 
 def test_multiword_keyword_matches():
-    result = analyze_topics(_sm("Can you explain how to set this up?"))
+    result = analyze_topics(_sm("Can you explain how to set this up?"), owner="alice")
     assert "Learning" in _freq(result)
+
+
+def test_ownerless_caller_gets_nothing():
+    # Security regression guard: a None owner must never aggregate
+    # cross-tenant topics (src/topic_analyzer.py returns empty by design).
+    result = analyze_topics(_sm("Python code algorithm"))
+    assert result == {"topics": [], "total_topics": 0}
+
+
+def test_other_owners_sessions_are_excluded():
+    result = analyze_topics(_sm("I wrote some Python code."), owner="bob")
+    assert result["topics"] == []

@@ -718,6 +718,12 @@ def test_internal_tool_owner_header_logic_requires_known_user():
 def test_auth_manager_migrates_legacy_admin_role(tmp_path):
     """Old setup.py wrote role='admin'; startup must turn that into is_admin."""
     sys.modules.pop("core.auth", None)
+    # Some test modules install a fake core.atomic_io at collection time
+    # (test_skills_manager_owner_isolation.py); a re-imported core.auth must
+    # bind the REAL atomic_write_json or the migrated auth.json comes out as
+    # the fake's "{}" placeholder.
+    if not getattr(sys.modules.get("core.atomic_io"), "__file__", None):
+        sys.modules.pop("core.atomic_io", None)
     if "core" in sys.modules and hasattr(sys.modules["core"], "auth"):
         delattr(sys.modules["core"], "auth")
     from core.auth import AuthManager

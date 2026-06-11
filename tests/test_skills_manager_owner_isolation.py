@@ -52,7 +52,22 @@ _fake_core.atomic_write_text = _fake_atomic_write_text
 _fake_core.atomic_write_json = lambda p, d, **kw: Path(p).write_text(
     "{}", encoding="utf-8"
 )
+# Remember what was installed and put it back after this module's tests.
+# Leaving the do-nothing atomic_write_json in sys.modules silently corrupted
+# any later test that persists JSON through a freshly imported module
+# (e.g. the core.auth legacy-admin migration test).
+_PRIOR_ATOMIC_IO = sys.modules.get("core.atomic_io")
 sys.modules["core.atomic_io"] = _fake_core
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_atomic_io_after_module():
+    sys.modules["core.atomic_io"] = _fake_core
+    yield
+    if _PRIOR_ATOMIC_IO is not None and getattr(_PRIOR_ATOMIC_IO, "__file__", None):
+        sys.modules["core.atomic_io"] = _PRIOR_ATOMIC_IO
+    else:
+        sys.modules.pop("core.atomic_io", None)
 
 
 from services.memory.skills import SkillsManager  # noqa: E402

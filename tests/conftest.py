@@ -32,3 +32,17 @@ if "src.database" not in sys.modules:
     _db.SessionLocal = MagicMock()
     _db.ModelEndpoint = MagicMock()
     sys.modules["src.database"] = _db
+
+# Pre-import the real lightweight core modules when their dependencies exist.
+# Several test files stub these at module level with an "if mod not in
+# sys.modules" guard (test_agent_loop.py, test_llm_core_sanitize_tool_calls.py,
+# ...). Collection order made those stubs win for the WHOLE session, so
+# later-collected tests that need the real Session/ChatMessage/ScheduledTask/
+# AuthManager classes failed only in full runs (classic cross-test pollution).
+# With the real modules already in sys.modules those guards become no-ops.
+if _has_module("sqlalchemy"):
+    import sqlalchemy  # noqa: F401
+    import core.models  # noqa: F401
+    import core.database  # noqa: F401
+if _has_module("bcrypt"):
+    import core.auth  # noqa: F401
