@@ -16,7 +16,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.auth_helpers import require_user
-from src import mission_engine, mission_workspaces
+from src import agent_sessions, mission_engine, mission_workspaces
+from src.agent_sessions import AgentSessionError
 from src.mission_engine import MissionError
 from src.mission_policy import (
     MissionPolicyError,
@@ -49,23 +50,23 @@ class WorkspaceCreateRequest(BaseModel):
     device_id: str = Field(..., min_length=4, max_length=80)
     root: str = Field(..., min_length=1, max_length=1000)
     name: str = Field(default="", max_length=100)
-    mode: str = Field(default="auto", pattern="^(ask|auto|full)$")
+    mode: str = Field(default="auto", pattern="^(ask|auto|full|unattended)$")
 
 
 class WorkspaceModeRequest(BaseModel):
-    mode: str = Field(..., pattern="^(ask|auto|full)$")
+    mode: str = Field(..., pattern="^(ask|auto|full|unattended)$")
 
 
 class WorkspaceActionRequest(BaseModel):
     action: str = Field(..., max_length=40)
     args: dict[str, Any] = Field(default_factory=dict)
-    mode: str | None = Field(default=None, pattern="^(ask|auto|full)$")
+    mode: str | None = Field(default=None, pattern="^(ask|auto|full|unattended)$")
 
 
 class MissionCreateRequest(BaseModel):
     workspace_id: str = Field(..., min_length=4, max_length=40)
     goal: str = Field(..., min_length=8, max_length=4000)
-    mode: str = Field(default="auto", pattern="^(ask|auto|full)$")
+    mode: str = Field(default="auto", pattern="^(ask|auto|full|unattended)$")
     allow_network: bool = False
     roles: dict[str, dict[str, str]] = Field(default_factory=dict)
 
@@ -86,6 +87,28 @@ class FullAccessRequest(BaseModel):
     device_id: str = Field(..., min_length=4, max_length=80)
     password: str = Field(..., min_length=1, max_length=200)
     duration_seconds: int | None = Field(default=None, ge=60, le=8 * 3600)
+
+
+class SessionCreateRequest(BaseModel):
+    workspace_id: str = Field(..., min_length=4, max_length=40)
+    task: str = Field(..., min_length=4, max_length=4000)
+    endpoint_id: str = Field(..., min_length=1, max_length=80)
+    model: str = Field(..., min_length=1, max_length=120)
+    fallbacks: list[dict[str, str]] = Field(default_factory=list, max_length=5)
+    auto_fallback: bool = False
+
+
+class SessionMessageRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+class SessionRetryRequest(BaseModel):
+    endpoint_id: str = Field(default="", max_length=80)
+    model: str = Field(default="", max_length=120)
+
+
+class SessionApprovalRequest(BaseModel):
+    decision: str = Field(..., pattern="^(allow_once|allow_session|allow_always|decline|stop_session)$")
 
 
 class GrantRequest(BaseModel):
@@ -112,9 +135,12 @@ def setup_mission_routes() -> APIRouter:
     @router.post("/workspaces")
     def workspaces_create(payload: WorkspaceCreateRequest, request: Request):
         user = _real_user(request)
+        from src.shadow_devices import ShadowDeviceError
         try:
             return mission_workspaces.create_workspace(
                 user, payload.device_id, payload.root, payload.name, payload.mode)
+        except ShadowDeviceError as exc:
+            raise HTTPException(404, str(exc)) from exc
         except (WorkspaceError, MissionPolicyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -215,6 +241,96 @@ def setup_mission_routes() -> APIRouter:
     def policy_full_access_status(device_id: str, request: Request):
         row = full_access_active(_real_user(request), device_id)
         return {"armed": bool(row), "expires_at": (row or {}).get("expires_at")}
+
+    # ── agent sessions (direct tool loop, no planner DAG) ─────────────
+    # Defined before the /{mission_id} routes so "/sessions" never matches
+    # the mission-id path parameter.
+
+    @router.get("/sessions")
+    def sessions_list(request: Request):
+        return {"sessions": agent_sessions.list_sessions(_real_user(request))}
+
+    @router.post("/sessions")
+    async def sessions_create(payload: SessionCreateRequest, request: Request):
+        user = _real_user(request)
+        try:
+            session = agent_sessions.create_session(
+                user, payload.workspace_id, payload.task,
+                model={"endpoint_id": payload.endpoint_id, "model": payload.model},
+                fallbacks=payload.fallbacks,
+                auto_fallback=payload.auto_fallback,
+            )
+            agent_sessions.start_session(user, session["id"])
+            return agent_sessions.load_session(user, session["id"])
+        except (AgentSessionError, WorkspaceError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/sessions/{sid}")
+    def session_detail(sid: str, request: Request):
+        try:
+            return agent_sessions.load_session(_real_user(request), sid)
+        except AgentSessionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @router.post("/sessions/{sid}/message")
+    async def session_message(sid: str, payload: SessionMessageRequest, request: Request):
+        user = _real_user(request)
+        try:
+            result = agent_sessions.send_message(user, sid, payload.text)
+            if not result.get("running"):
+                try:
+                    agent_sessions.start_session(user, sid)
+                except AgentSessionError:
+                    pass  # e.g. raced with another start; the inbox is durable
+            return result
+        except AgentSessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/sessions/{sid}/stop")
+    async def session_stop(sid: str, request: Request):
+        try:
+            return agent_sessions.stop_session(_real_user(request), sid)
+        except AgentSessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/sessions/{sid}/resume")
+    async def session_resume(sid: str, request: Request):
+        try:
+            return agent_sessions.retry_session(_real_user(request), sid)
+        except AgentSessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/sessions/{sid}/retry")
+    async def session_retry(sid: str, payload: SessionRetryRequest, request: Request):
+        try:
+            return agent_sessions.retry_session(
+                _real_user(request), sid,
+                endpoint_id=payload.endpoint_id, model=payload.model)
+        except AgentSessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/sessions/{sid}/rollback")
+    async def session_rollback(sid: str, payload: RollbackRequest, request: Request):
+        try:
+            return await agent_sessions.rollback_session(
+                _real_user(request), sid, paths=payload.paths)
+        except AgentSessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (WorkspaceDenied, WorkspaceError) as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, str(exc)[:300]) from exc
+
+    @router.post("/sessions/{sid}/approvals/{approval_id}")
+    async def session_approval(sid: str, approval_id: str,
+                               payload: SessionApprovalRequest, request: Request):
+        try:
+            return agent_sessions.resolve_approval(
+                _real_user(request), sid, approval_id, payload.decision)
+        except AgentSessionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except MissionPolicyError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     # ── missions ────────────────────────────────────────────────────────
 

@@ -945,6 +945,13 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Mission recovery failed: {e}")
 
+    # Agent sessions interrupted by a restart become stopped + resumable.
+    try:
+        from src.agent_sessions import recover_sessions
+        recover_sessions()
+    except Exception as e:
+        logger.warning(f"Agent session recovery failed: {e}")
+
     async def _ensure_default_tasks():
         # Create/reconcile default automation tasks + personal assistant for every user.
         owners = set()

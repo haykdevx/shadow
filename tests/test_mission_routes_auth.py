@@ -56,6 +56,12 @@ PROTECTED = [
     ("POST", "/api/missions/abcdef1234/approvals/ap1", {"decision": "allow_once"}),
     ("POST", "/api/missions/abcdef1234/start", None),
     ("POST", "/api/missions/workspaces/wsid1234/action", {"action": "ws_read", "args": {}}),
+    ("GET", "/api/missions/sessions", None),
+    ("POST", "/api/missions/sessions",
+     {"workspace_id": "w" * 8, "task": "do something", "endpoint_id": "ep1", "model": "m"}),
+    ("POST", "/api/missions/sessions/abcdef1234/stop", None),
+    ("POST", "/api/missions/sessions/abcdef1234/message", {"text": "hello"}),
+    ("POST", "/api/missions/sessions/abcdef1234/approvals/ap1", {"decision": "allow_once"}),
 ]
 
 

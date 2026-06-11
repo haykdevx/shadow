@@ -35,7 +35,9 @@ DEFAULT_PRIVILEGES = {
 # Admins get everything
 ADMIN_PRIVILEGES = {k: (True if isinstance(v, bool) else (0 if isinstance(v, int) else [])) for k, v in DEFAULT_PRIVILEGES.items()}
 
-DEFAULT_AUTH_PATH = os.path.join(
+# SHADOW_AUTH_PATH lets isolated test/e2e instances keep their own account
+# store instead of sharing the repo-anchored one.
+DEFAULT_AUTH_PATH = os.getenv("SHADOW_AUTH_PATH") or os.path.join(
     Path(__file__).parent.parent, "data", "auth.json"
 )
 TOKEN_TTL = 60 * 60 * 24 * 7  # 7 days
