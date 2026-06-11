@@ -494,7 +494,7 @@ def setup_chat_routes(
             if not _privs.get("can_use_bash", True):
                 disabled_tools.update({"bash", "python", "read_file", "write_file"})
             if not _privs.get("can_use_browser", True):
-                disabled_tools.add("builtin_browser")
+                disabled_tools.update({"builtin_browser", "browser"})
             if not _privs.get("can_use_documents", True):
                 disabled_tools.update({"create_document", "edit_document", "update_document", "suggest_document"})
             if not _privs.get("can_generate_images", True):
@@ -519,7 +519,7 @@ def setup_chat_routes(
         # (and looks broken when the shell is disabled).
         if auto_escalated:
             disabled_tools.update({
-                "bash", "python", "read_file", "write_file", "builtin_browser",
+                "bash", "python", "read_file", "write_file", "builtin_browser", "browser",
             })
 
         # Disable document tools in compare sessions — they break the pane UI

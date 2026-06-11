@@ -125,6 +125,8 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
+    "/api/magi/deliberate", # honors payload timeout_seconds (≤600s); orchestrator enforces per-call deadlines
+    "/api/browser",         # browser_manager enforces its own nav/action timeouts; /browse runs ≤110s
 )
 
 
@@ -712,6 +714,9 @@ app.include_router(setup_companion_routes())
 from routes.shadow_routes import setup_shadow_routes
 app.include_router(setup_shadow_routes())
 
+from routes.browser_routes import setup_browser_routes
+app.include_router(setup_browser_routes())
+
 from routes.music_routes import setup_music_routes
 app.include_router(setup_music_routes())
 
@@ -921,6 +926,11 @@ async def startup_event():
 
     _startup_tasks.append(asyncio.create_task(_keepalive_loop()))
 
+    # Browser browse-task worker: serves queued tasks from sidecar processes
+    # (Telegram bridge) via the shared data/ volume.
+    from src.browser_tasks import worker_loop as _browser_task_worker
+    _startup_tasks.append(asyncio.create_task(_browser_task_worker()))
+
     async def _ensure_default_tasks():
         # Create/reconcile default automation tasks + personal assistant for every user.
         owners = set()
@@ -1071,4 +1081,10 @@ async def shutdown_event():
         await mcp_manager.disconnect_all()
     except Exception as e:
         logger.warning(f"MCP shutdown error: {e}")
+    # Close all per-account browser contexts and stop Playwright
+    try:
+        from src.browser_manager import MANAGER as _browser_manager
+        await _browser_manager.shutdown()
+    except Exception as e:
+        logger.warning(f"Browser shutdown error: {e}")
     logger.info("Application shutdown complete")

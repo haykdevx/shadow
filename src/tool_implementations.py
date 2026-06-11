@@ -1660,7 +1660,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             # Tool-toggle actions. These edit settings.json:disabled_tools
             # (the global list read on every chat request) rather than
             # prefs.json. Friendly aliases accepted: "shell" -> "bash",
-            # "search" -> "web_search", "browser" -> "builtin_browser",
+            # "search" -> "web_search", "browser" -> the browser tools,
             # "documents" -> the document tool set, "memory" ->
             # manage_memory, etc.
             from src.settings import get_setting, save_settings, load_settings
@@ -1669,7 +1669,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 "terminal": ["bash"],
                 "search": ["web_search"],
                 "web": ["web_search"],
-                "browser": ["builtin_browser"],
+                "browser": ["browser", "builtin_browser"],
                 "documents": ["create_document", "edit_document", "update_document", "suggest_document"],
                 "doc": ["create_document", "edit_document", "update_document", "suggest_document"],
                 "memory": ["manage_memory"],
@@ -4082,3 +4082,56 @@ async def do_pc_control(content: str, owner: Optional[str] = None) -> Dict:
     from src.shadow_pc import tool_action
 
     return tool_action(content, requested_by=f"agent:{owner or 'unknown'}")
+
+
+async def do_browser(content: str, owner: Optional[str] = None) -> Dict:
+    """Drive the owner's isolated server-side Chromium via src.browser_manager."""
+    from src.browser_manager import MANAGER, BrowserError
+
+    try:
+        payload = json.loads(content or "{}")
+    except json.JSONDecodeError:
+        return {"error": "browser expects JSON arguments, e.g. {\"action\": \"navigate\", \"url\": \"https://example.com\"}", "exit_code": 1}
+    if not isinstance(payload, dict):
+        return {"error": "browser expects a JSON object", "exit_code": 1}
+    if not owner:
+        return {"error": "browser requires a signed-in account", "exit_code": 1}
+    action = str(payload.pop("action", "") or "").strip().lower()
+    try:
+        result = await MANAGER.run_action(owner, action, payload, requested_by=f"agent:{owner}")
+    except BrowserError as exc:
+        return {"error": str(exc), "exit_code": 1}
+
+    if result.get("status") == "pending_confirmation":
+        pending = result["pending"]
+        return {
+            "output": (
+                f"Browser action `{pending['action']}` is waiting for explicit approval "
+                f"(reason: {pending.get('reason', 'gated')}). Pending id: `{pending['id']}`. "
+                "The action has NOT executed. Tell the user to approve it from the Browser panel."
+            ),
+            "exit_code": 0,
+            "pending_confirmation": pending,
+        }
+
+    lines = [result.get("detail") or result.get("status") or "ok"]
+    if result.get("title"):
+        lines.append(f"Title: {result['title']}")
+    if result.get("url"):
+        lines.append(f"URL: {result['url']}")
+    if result.get("text"):
+        truncated = " …(truncated)" if result.get("truncated") else ""
+        lines.append(f"Page text:\n{result['text']}{truncated}")
+    if result.get("links"):
+        lines.append("Links:\n" + "\n".join(f"- {l['text']} -> {l['href']}" for l in result["links"][:30]))
+    if result.get("tabs"):
+        lines.append("Tabs:\n" + "\n".join(f"- [{t['index']}]{' *' if t.get('current') else ''} {t['url']}" for t in result["tabs"]))
+    if result.get("result") is not None and action == "eval":
+        lines.append(f"Result: {result['result']}")
+    if result.get("shot_url"):
+        lines.append(f"Screenshot: ![page]({result['shot_url']})")
+    if result.get("pending"):
+        gated = result["pending"]
+        if isinstance(gated, list) and gated:
+            lines.append(f"{len(gated)} action(s) awaiting human approval.")
+    return {"output": "\n".join(lines), "exit_code": 0, "result": {k: v for k, v in result.items() if k != "text"}}

@@ -36,6 +36,7 @@ HELP = """Shadow PC control
 /processes - top processes
 /clip get - read clipboard
 /clip set <text> - request clipboard write approval
+/browse <url or search> - run a private browser task (summary + screenshot)
 /pending - list your approvals
 /approve <id> - approve your pending action
 /cancel <id> - cancel your pending action
@@ -184,6 +185,46 @@ def _handle_pair(chat_id: int, user_id: int, code: str, message: dict[str, Any] 
         _send(chat_id, "Pairing code is invalid or expired.")
 
 
+def _handle_browse(chat_id: int, username: str, instruction: str) -> None:
+    """Queue a browse task for the app's browser worker and relay the result.
+
+    The bot only shares the data/ volume with the app, so this goes through
+    the file-backed queue in src.browser_tasks rather than HTTP.
+    """
+    from src.browser_tasks import enqueue, wait_result
+
+    if not instruction:
+        _send(chat_id, "Usage: /browse <url or search terms>")
+        return
+    _send(chat_id, "Browsing…")
+    task_id = enqueue(username, instruction)
+    result = wait_result(task_id, timeout_seconds=90)
+    if result is None:
+        _send(chat_id, "Browse task timed out — is the Shadow app running?")
+        return
+    if not result.get("ok"):
+        _send(chat_id, f"Browse failed: {result.get('error') or 'unknown error'}")
+        return
+    title = result.get("title") or result.get("url") or "page"
+    text = (result.get("text") or "").strip()
+    summary = text[:900] + ("…" if len(text) > 900 else "")
+    _send(chat_id, f"{title}\n{result.get('url') or ''}\n\n{summary}".strip())
+    shot_path = result.get("shot_path") or ""
+    if shot_path and Path(shot_path).is_file():
+        try:
+            sent = _tg(
+                "sendPhoto",
+                chat_id=str(chat_id),
+                caption=str(title)[:200],
+                files={"photo": ("shadow-browse.jpg", Path(shot_path).read_bytes(), "image/jpeg")},
+            )
+            if sent.get("ok"):
+                record_message(username, chat_id, "out", "[Browse screenshot]",
+                               telegram_message_id=(sent.get("result") or {}).get("message_id"))
+        except OSError:
+            pass  # screenshot is best-effort; the text result already went out
+
+
 def _handle_message(message: dict[str, Any]) -> None:
     chat_id = int(message.get("chat", {}).get("id", 0))
     user_id = int(message.get("from", {}).get("id", 0))
@@ -231,6 +272,8 @@ def _handle_message(message: dict[str, Any]) -> None:
             _send(chat_id, f"Process list failed: {exc}")
     elif cmd == "/clip":
         _handle_clip(chat_id, username, rest.strip())
+    elif cmd == "/browse":
+        _handle_browse(chat_id, username, rest.strip())
     elif cmd == "/pending":
         _send(chat_id, _fmt_pending(list_pending(principal=username)))
     elif cmd == "/approve" and rest.strip():
@@ -276,6 +319,20 @@ def _handle_callback(callback: dict[str, Any]) -> None:
         _send(chat_id, f"Approval failed: {exc}")
 
 
+def _dispatch_message(message: dict[str, Any]) -> None:
+    """Thread entrypoint: surface handler crashes instead of dying silently."""
+    try:
+        _handle_message(message)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[shadow-telegram] message handler failed: {exc!r}")
+        chat_id = (message.get("chat") or {}).get("id")
+        if chat_id:
+            try:
+                _send(int(chat_id), "Sorry — that command failed on the Shadow side.")
+            except Exception:  # noqa: BLE001 — best-effort notification only
+                pass
+
+
 def main() -> None:
     if not BOT_TOKEN:
         raise SystemExit("Set SHADOW_TELEGRAM_BOT_TOKEN")
@@ -287,11 +344,18 @@ def main() -> None:
             time.sleep(3)
             continue
         for update in payload.get("result", []):
-            offset = max(offset, int(update.get("update_id", 0)) + 1)
-            if update.get("callback_query"):
-                _handle_callback(update["callback_query"])
-            elif update.get("message"):
-                threading.Thread(target=_handle_message, args=(update["message"],), daemon=True).start()
+            try:
+                offset = max(offset, int(update.get("update_id") or 0) + 1)
+            except (TypeError, ValueError):
+                offset += 1  # poison update_id: still move past it
+            # One malformed update must never take down the whole bridge.
+            try:
+                if update.get("callback_query"):
+                    _handle_callback(update["callback_query"])
+                elif update.get("message"):
+                    threading.Thread(target=_dispatch_message, args=(update["message"],), daemon=True).start()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[shadow-telegram] update {update.get('update_id')} failed: {exc!r}")
 
 
 if __name__ == "__main__":

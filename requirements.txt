@@ -51,3 +51,7 @@ pytest
 pytest-asyncio
 # MTProto Telegram user-account client (real chats, not just bot API)
 telethon
+# Server-side per-account Chromium for the agent browser (src/browser_manager.py).
+# The browser binary itself is installed in the Docker image / via
+# `python -m playwright install chromium`.
+playwright

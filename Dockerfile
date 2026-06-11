@@ -35,6 +35,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Chromium + its shared libraries for the per-account agent browser
+# (src/browser_manager.py). A fixed, world-readable browsers path is needed
+# because the build runs as root but the entrypoint drops to PUID:PGID.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy app code
 COPY . .
 

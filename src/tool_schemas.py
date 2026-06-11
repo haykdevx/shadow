@@ -1070,6 +1070,30 @@ FUNCTION_TOOL_SCHEMAS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser",
+            "description": "Drive a real server-side Chromium browser with the user's private persistent profile (full JS, cookies, logins survive between actions). Use navigate then read/links/click/fill to work a page. Irreversible-looking actions (purchase/send/post/delete buttons, password fields, eval) only create a pending approval — tell the user approval is required.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["navigate", "read", "links", "click", "fill", "press", "eval", "screenshot", "back", "forward", "reload", "wait", "download", "tabs", "switch_tab", "status"]},
+                    "url": {"type": "string", "description": "Target URL for navigate/download"},
+                    "selector": {"type": "string", "description": "CSS selector for read/click/fill/press/wait"},
+                    "text": {"type": "string", "description": "Visible text to target for click when no selector is known"},
+                    "value": {"type": "string", "description": "Text to type for fill"},
+                    "key": {"type": "string", "description": "Key for press (default Enter)"},
+                    "js": {"type": "string", "description": "JavaScript for eval (requires human approval)"},
+                    "full_page": {"type": "boolean", "description": "Screenshot the full page instead of the viewport"},
+                    "max_chars": {"type": "integer", "description": "Max characters for read (default 6000)"},
+                    "ms": {"type": "integer", "description": "Milliseconds for wait (max 10000)"},
+                    "index": {"type": "integer", "description": "Tab index for switch_tab"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
 ]
 
 
