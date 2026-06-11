@@ -831,3 +831,34 @@
 .command-install-row{display:grid;grid-template-columns:150px minmax(0,1fr) auto;padding:10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.18)}
 .command-install-row code{min-width:0;overflow:auto;padding:8px;border-radius:5px;background:rgba(0,0,0,.32);color:var(--fg);font-size:11px;white-space:nowrap}
 @media(max-width:720px){.command-device-head,.command-device-row,.command-install-row{display:grid;grid-template-columns:1fr}}
+
+/* Account-scoped interactive remote desktop */
+.command-remote-head,.command-remote-intro,.command-remote-device,.command-remote-invite{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.command-remote-head strong,.command-remote-intro strong,.command-remote-device strong,.command-remote-invite strong{display:block}
+.command-remote-head small,.command-remote-intro small,.command-remote-device small,.command-remote-invite small{display:block;margin-top:4px;color:var(--fg-muted,var(--color-subheader));font-size:11px}
+.command-remote-security{display:flex;flex-wrap:wrap;gap:7px;margin:13px 0}
+.command-remote-security span{padding:5px 8px;border:1px solid rgba(57,217,138,.34);border-radius:999px;background:rgba(57,217,138,.07);color:#7ee8b0;font:10px ui-monospace,"JetBrains Mono",monospace;letter-spacing:.05em}
+.command-remote-devices{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:12px}
+.command-remote-device{justify-content:flex-start;padding:10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.18)}
+.command-remote-invite{display:grid;grid-template-columns:minmax(180px,1fr) minmax(240px,2fr) auto auto;margin-top:12px;padding:10px;border:1px solid color-mix(in srgb,var(--brand-color,var(--red)) 34%,var(--border));border-radius:6px;background:rgba(0,0,0,.2)}
+.command-remote-invite code,.command-remote-intro code{min-width:0;overflow:auto;padding:8px;border-radius:5px;background:rgba(0,0,0,.34);color:var(--fg);font-size:11px;white-space:nowrap}
+.command-remote-overlay{position:fixed;inset:0;z-index:32000;display:grid;grid-template-rows:auto minmax(0,1fr);background:#050708;color:var(--fg)}
+.command-remote-overlay[hidden]{display:none!important}
+.command-remote-overlay header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid color-mix(in srgb,var(--brand-color,var(--red)) 45%,var(--border));background:#080b0d}
+.command-remote-overlay iframe{display:block;width:100%;height:100%;border:0;background:#111}
+body.command-remote-open{overflow:hidden}
+@media(max-width:800px){.command-remote-head,.command-remote-intro,.command-remote-invite{display:grid;grid-template-columns:1fr}.command-remote-overlay header{padding:9px 10px}}
+
+/* Account-scoped server-side browser */
+.command-browser-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:12px 0}
+.command-browser-bar input{min-width:0;padding:9px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.3);color:var(--fg);font:12px ui-monospace,"JetBrains Mono",monospace}
+.command-browser-bar input:focus{outline:none;border-color:color-mix(in srgb,var(--brand-color,var(--red)) 55%,var(--border))}
+.command-browser-now{margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,.18)}
+.command-browser-now strong{display:block;font-size:12px}
+.command-browser-now small{display:block;margin-top:3px;color:var(--fg-muted,var(--color-subheader));font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.command-browser-history{display:grid;gap:5px;margin-top:12px}
+.command-browser-history-row{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px;padding:6px 9px;border:1px solid var(--border);border-radius:5px;background:rgba(0,0,0,.16);font-size:11px}
+.command-browser-history-row span{font:10px ui-monospace,"JetBrains Mono",monospace;letter-spacing:.04em;text-transform:uppercase}
+.command-browser-history-row small{color:var(--fg-muted,var(--color-subheader));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.command-browser-history-row[data-ok="0"]{border-color:color-mix(in srgb,var(--red) 45%,var(--border))}
+.command-browser-history-row[data-gated="1"]{border-color:color-mix(in srgb,#e8b339 45%,var(--border))}

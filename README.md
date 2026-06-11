@@ -37,6 +37,7 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 - **Command** — every Shadow account can enroll its own Linux, macOS, or Windows PC with a one-line installer, then access vitals, screenshots, processes, files, windows, runbooks, and approvals.
 - The account-owned device agent connects outbound over HTTPS; it opens no home-router port. Destructive actions remain server- and device-gated behind explicit confirmation.
 - **Telegram inbox + remote** — pair one Telegram identity to one Shadow account. Bot chats appear inside Shadow and commands can control only that account's enrolled PCs.
+- **Agent browser** — a real per-account Chromium (Playwright) the agent and you share: persistent isolated profile, Command-page panel with live capture, Telegram `/browse`, optional MAGI evidence source. Risky actions (payments, sends, posts, deletes, secret-field fills, raw JS) stop server-side and wait for your explicit approval.
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 
@@ -108,6 +109,11 @@ Open **Command**, create a single-use setup code, and run the generated command 
 ### Interactive Remote Desktop
 Enable the optional `remote` Docker profile to add browser-based screen control powered by MeshCentral. Shadow provisions a separate restricted MeshCentral identity and device group per account, encrypts the per-user credential at rest, and launches the embedded console with a three-minute login token. MeshCentral terminal and file access are disabled; those capabilities stay behind Shadow's existing approval gates. The service binds to loopback and is published only as same-origin `/remote/` through the TLS reverse proxy.
 
+### Agent browser
+A genuine server-side Chromium (Playwright, `src/browser_manager.py`) — not a URL fetcher. Each account gets its own persistent browser profile (`data/browser/profiles/<account>`, mode 0700); logins persist between tasks and are never shared across accounts. The agent drives it through the native `browser` tool, you drive it from the Command page (live capture, URL/command box, history), Telegram supports `/browse <url or search>`, and MAGI can opt in to it as a shared evidence source.
+
+Safety is enforced server-side, not by prompting: every endpoint requires an interactive cookie session (agents and API tokens cannot approve anything); purchases, sends, posts, deletes, secret-field fills, and raw JS become pending approvals that execute only after you approve them in the panel — and an approval is voided if the page navigated in the meantime. URL policy blocks non-http(s) schemes, private/link-local/metadata addresses (including at DNS resolution and after redirects), and honors `SHADOW_BROWSER_ALLOW_DOMAINS` / `SHADOW_BROWSER_DENY_DOMAINS`. Actions are rate-limited per account, idle contexts are reaped, and logs/screenshot listings redact values and query strings. On multi-user installs the tool is admin-only by default. All knobs are documented in `.env.example`.
+
 ### MAGI deliberation engine
 **MAGI** runs one query through three independent units — **MELCHIOR・01** (Scientist), **BALTHASAR・02** (Guardian), **CASPER・03** (Skeptic) — each backed by its own endpoint/model, then resolves their verdicts into a single answer. It is text-only and entirely additive: when MAGI is disabled the normal chat path is untouched.
 
@@ -151,9 +157,11 @@ Enable the optional `remote` Docker profile to add browser-based screen control 
 `confidence` is normalized to `0..1` (percentages are coerced); a malformed response triggers **exactly one** repair re-ask with the exact schema, and if it still fails the unit is marked **MALFUNCTION** and excluded from voting. Parsing/validation lives in `src/magi_deliberation.py` (pure, fully unit-tested).
 
 **Concurrent, resilient orchestration** (`src/magi_orchestrator.py`): units run in parallel with a per-unit timeout; one provider failing or timing out never aborts the others (the result is reported `degraded`). Resolution modes:
-- **VOTE** — `unanimous` / `majority` (>½ of valid units) / `deadlock` / `insufficient` (1 valid) / `malfunction` (0 valid); the majority answer is selected and dissent is listed.
+- **VOTE** — `unanimous` / `majority` (>½ of valid units) / `deadlock` / `insufficient` (1 valid) / `malfunction` (0 valid); the majority answer is selected and dissent is listed. An optional **confidence-weighted** mode ranks stances by summed unit confidence instead of head-count; an exact weight tie escalates to the judge.
 - **DEBATE** — one real peer-review round where each unit re-evaluates against its peers, then a re-vote on the revised verdicts. A failed debate round cleanly retains the unit's round-one verdict.
-- **JUDGE** — a synthesis pass that fuses the valid verdicts into one decisive answer while explicitly reporting agreement and dissent. A deadlock auto-escalates to the judge only when ≥2 valid units exist; judge failure falls back to the vote without destroying unit results.
+- **JUDGE** — a synthesis pass that fuses the valid verdicts into one decisive answer while explicitly reporting agreement and dissent. Deadlocks, weighted ties, and CONDITIONAL outcomes (which need their conditions synthesized) auto-escalate to the judge when ≥2 valid units exist; judge failure falls back to the vote without destroying unit results.
+
+**Evidence grounding (opt-in).** Before deliberation, MAGI can run one bounded agent-browser fetch (`evidence` + optional `evidence_query`) and hand the identical, explicitly untrusted-framed excerpt to all three units, so they argue about the same facts. Retrieval failure never aborts a deliberation — it degrades to evidence-free and reports `evidence_error`. Results also carry `model_diversity`: deliberating with duplicated models is allowed but visibly warned, since copies of one model share blind spots.
 
 **Streaming.** `POST /api/magi/deliberate/stream` (SSE over a streaming `fetch`) emits independent `unit` → `peer_review`/`judge` `system` → `resolved` events, so each node updates the instant it answers instead of waiting for the slowest model. A client disconnect cancels any unfinished work. Exactly one user message and one final assistant message are persisted per deliberation; provider keys/headers are never exposed. The legacy non-streaming `POST /api/magi/deliberate` is retained. The backend enforces per-user endpoint/model visibility and rejects explicitly selected hidden/nonexistent models, while **auto** mode maximizes distinct endpoint/model assignments across the three units (`routes/magi_routes.py`).
 

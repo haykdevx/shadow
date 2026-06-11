@@ -40,6 +40,24 @@ Security fixes are handled on the default branch until formal releases are cut.
 - Pending actions, audit events, the AI `pc_control` tool, and Telegram identities are scoped to the linked Shadow account. Browser approval requires an interactive account with `approve`; internal tool and bearer API tokens cannot self-approve.
 - Screenshots are captured into a temporary file, returned to the authenticated caller, and deleted immediately.
 
+## Agent Browser
+
+- Every `/api/browser/*` endpoint requires an interactive cookie session. Internal agent identities and bearer API tokens are rejected outright, so an agent can never approve its own gated action. On multi-user installs the `browser` tool is additionally admin-only by default.
+- Irreversible or sensitive actions — purchases, sends, posts, deletes, password/OTP/card field fills, raw `eval` JS — never execute directly. They become server-side pending approvals (short TTL, in-memory, dropped on restart) that run only after explicit approval from the Browser panel. An approval is voided if the page navigated since it was requested.
+- Each account gets an isolated persistent Chromium profile under `data/browser/profiles/<account>` (mode 0700). Profiles, cookies, and logged-in sessions are never shared across accounts; `POST /api/browser/wipe` destroys the profile.
+- URL policy: http/https only; localhost, RFC1918, link-local, and cloud-metadata addresses are blocked by hostname and again at DNS resolution; main-frame navigations are re-checked after redirects; subresource requests to private space are aborted. `SHADOW_BROWSER_ALLOW_DOMAINS` / `SHADOW_BROWSER_DENY_DOMAINS` narrow it further. Known residual: hostname-level subresource checks do not defeat DNS rebinding — use a filtering egress proxy if that is in your threat model.
+- Actions are rate-limited per account (`SHADOW_BROWSER_ACTIONS_PER_MINUTE`); approval listings and history redact fill values and URL query strings; screenshots are stored per-account and pruned. Stored secrets are never auto-entered without a per-action approval.
+- The Telegram `/browse` path uses a file queue on the shared `data/` volume (0700, files 0600) rather than a network endpoint; the bot container's pairing is the authorization boundary.
+- Never bind the app publicly without the TLS reverse proxy in DEPLOY.md; the browser endpoints inherit whatever exposure the app has.
+
+## Interactive Remote Desktop
+
+- MeshCentral is optional and must bind to loopback (`SHADOW_MESH_BIND=127.0.0.1`). Expose it only through the authenticated Shadow HTTPS origin at `/remote/`.
+- The internal gateway has no published port and accepts only a random `SHADOW_MESH_GATEWAY_KEY` of at least 32 characters.
+- Every Shadow account maps to a distinct MeshCentral user and device group. Remote credentials are encrypted with `data/.app_key`; preserve that key in backups.
+- Browser access uses short-lived login tokens. MeshCentral users receive desktop-control rights only; terminal, files, server tools, group creation, and settings changes remain disabled.
+- Keep `meshcentral-data`, `meshcentral-files`, and `meshcentral-backups` private. Never expose port `8443` directly to the internet.
+
 ## Publishing A Fork
 
 Before pushing a public fork, run:

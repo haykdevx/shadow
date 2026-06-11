@@ -50,8 +50,10 @@ these extension points instead of duplicating working subsystems.
 - `src/builtin_mcp.py` registers built-in stdio MCP servers at startup.
 - Bash, Python, filesystem reads/writes, and web search have direct in-process
   execution paths in `src/tool_execution.py`.
-- Image generation, memory, RAG, email, and optional Playwright browser tools
-  remain MCP-backed.
+- Image generation, memory, RAG, and email remain MCP-backed. The agent
+  browser is native and in-process (`browser` tool → `src/browser_manager.py`)
+  so it receives `owner`; the optional `@playwright/mcp` stdio server still
+  exists but is secondary and shares the same UI toggle.
 
 ## Existing Jarvis-Class Features
 
@@ -89,6 +91,12 @@ these extension points instead of duplicating working subsystems.
   before the companion service receives `confirmed=true`.
 - Browser approval endpoints require a real admin cookie. An internal agent
   token or bearer integration token cannot self-approve an action.
+- The agent browser is a native in-process tool (`src/browser_manager.py`,
+  `routes/browser_routes.py`, `do_browser`), not an MCP server, because
+  native tools receive `owner` and per-account profile isolation depends on
+  it. New gated capabilities should follow its pattern: pure `classify_risk`
+  → in-memory pending approval → interactive-cookie-only confirm, with the
+  approval voided when the page context drifts.
 - Telegram reuses `POST /api/v1/chat` with an owner-scoped chat token rather
   than creating another LLM loop.
 

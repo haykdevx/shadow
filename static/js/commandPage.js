@@ -1,5 +1,7 @@
 // Dedicated Shadow Command dashboard for private home-PC control.
 
+import { joinPath, parentPath } from './commandPaths.js';
+
 const API_ROOT = '/api/shadow';
 const REFRESH_MS = 10000;
 let root = null;
@@ -8,8 +10,11 @@ let enrollmentTimer = null;
 let currentPath = '';
 let lastReadFile = null;
 let selectedDeviceId = '';
+let remoteInviteUrl = '';
 let latest = {
   devices: null,
+  remote: null,
+  browser: null,
   overview: null,
   processes: null,
   windows: null,
@@ -22,6 +27,15 @@ let latest = {
   inspector: null,
 };
 let generatedPanels = [];
+
+function resetDeviceScopedState(deviceId = '') {
+  selectedDeviceId = deviceId;
+  currentPath = '';
+  lastReadFile = null;
+  for (const key of ['overview', 'processes', 'windows', 'clipboard', 'files', 'screen', 'inspector']) {
+    latest[key] = null;
+  }
+}
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -150,6 +164,8 @@ function buildShell() {
 
       <div class="command-grid">
         ${panel('access', 'Your Devices', 'private to this Shadow account', { wide: true, open: true })}
+        ${panel('remote', 'Remote Desktop', 'interactive screen control, account-isolated', { wide: true, open: true })}
+        ${panel('browser', 'Browser', 'private server-side Chromium, agent-shareable', { wide: true, open: true })}
         ${panel('vitals', 'Host / Vitals', 'live telemetry', { open: true })}
         ${panel('screen', 'Screen', 'live-ish capture')}
         ${panel('processes', 'Processes', 'top CPU/RAM')}
@@ -172,7 +188,14 @@ function buildShell() {
           <div class="command-panel-body generated-grid" data-panel-body="ai"></div>
         </section>
       </div>
-    </div>`;
+    </div>
+    <section class="command-remote-overlay" data-remote-overlay hidden>
+      <header>
+        <div><div class="command-kicker">SHADOW // REMOTE</div><strong>Interactive Remote Desktop</strong></div>
+        <button type="button" class="command-close" data-command-action="remote-close" aria-label="Close Remote Desktop">✕</button>
+      </header>
+      <iframe name="shadow-remote-console" data-remote-frame title="Shadow Remote Desktop"></iframe>
+    </section>`;
   document.body.appendChild(node);
   return node;
 }
@@ -204,7 +227,7 @@ function setState(id, online) {
 
 function setDeviceLocked(locked) {
   root?.querySelectorAll('[data-command-panel]').forEach((node) => {
-    if (node.dataset.commandPanel !== 'access') node.hidden = locked;
+    if (!['access', 'remote', 'browser'].includes(node.dataset.commandPanel)) node.hidden = locked;
   });
   root?.querySelectorAll('.command-top-actions [data-command-action]').forEach((node) => {
     if (!['close', 'add-device'].includes(node.dataset.commandAction)) node.hidden = locked;
@@ -223,7 +246,9 @@ function renderDevices(data) {
   latest.devices = data;
   const devices = Array.isArray(data?.devices) ? data.devices : [];
   const selected = devices.find((row) => row.selected) || devices[0] || null;
-  selectedDeviceId = selected?.id || '';
+  const nextDeviceId = selected?.id || '';
+  if (nextDeviceId !== selectedDeviceId) resetDeviceScopedState(nextDeviceId);
+  else selectedDeviceId = nextDeviceId;
   setDeviceLocked(!selected);
 
   const rows = devices.map((row) => `
@@ -292,7 +317,7 @@ async function createDeviceEnrollment() {
     const commandRows = [
       ['Linux', data.commands?.linux],
       ['macOS', data.commands?.macos],
-      ['Windows PowerShell', data.commands?.windows],
+      ['Windows (CMD / PowerShell, no dependencies)', data.commands?.windows],
     ].map(([label, command]) => `
       <div class="command-install-row">
         <div><strong>${esc(label)}</strong><small>Code expires ${esc(new Date(data.expires_at * 1000).toLocaleTimeString())}</small></div>
@@ -321,9 +346,7 @@ async function createDeviceEnrollment() {
 async function selectDevice(id) {
   try {
     await request(`/devices/${encodeURIComponent(id)}/select`, { method: 'POST' });
-    selectedDeviceId = id;
-    latest.screen = null;
-    currentPath = '';
+    resetDeviceScopedState(id);
     await bootstrapPage();
   } catch (error) {
     toast(`Device selection failed: ${error.message}`, true);
@@ -352,6 +375,122 @@ async function createTelegramPairCode() {
   } catch (error) {
     toast(`Telegram pairing failed: ${error.message}`, true);
   }
+}
+
+function renderRemote(data) {
+  latest.remote = data;
+  const configured = Boolean(data?.configured);
+  const ready = Boolean(data?.account_ready);
+  const devices = Array.isArray(data?.devices) ? data.devices : [];
+  setState('remote', configured && ready);
+
+  if (!configured) {
+    setBody('remote', `
+      <div class="command-remote-intro">
+        <div><strong>Remote Desktop is disabled on this server</strong><small>Enable the isolated Docker profile and proxy /remote/ through the same HTTPS origin.</small></div>
+        <code>docker compose --profile remote up -d</code>
+      </div>`);
+    return;
+  }
+
+  const rows = devices.map((device) => `
+    <div class="command-remote-device">
+      <span class="command-device-status" data-online="${device.connected ? '1' : '0'}"></span>
+      <span><strong>${esc(device.name)}</strong><small>${esc(device.os)} · ${device.connected ? 'online' : 'offline'}</small></span>
+    </div>`).join('');
+  const invite = remoteInviteUrl ? `
+    <div class="command-remote-invite">
+      <span><strong>Remote agent installer</strong><small>This invitation expires automatically and adds the PC only to your private remote group.</small></span>
+      <code>${esc(remoteInviteUrl)}</code>
+      <a class="command-btn" href="${esc(remoteInviteUrl)}" target="_blank" rel="noopener">Open installer</a>
+      <button type="button" class="command-btn" data-command-action="remote-copy">Copy link</button>
+    </div>` : '';
+
+  setBody('remote', `
+    <div class="command-remote-head">
+      <div><strong>${ready ? 'Private remote workspace ready' : 'Enable interactive remote access'}</strong><small>Every Shadow account receives a separate MeshCentral identity and device group. Remote users cannot see another account's PCs.</small></div>
+      <div class="command-inline-actions">
+        <button type="button" class="command-btn approve" data-command-action="remote-setup">${ready ? 'Add remote PC' : 'Enable Remote Desktop'}</button>
+        ${ready ? '<button type="button" class="command-btn" data-command-action="remote-open">Open console</button><button type="button" class="command-btn" data-command-action="remote-refresh">Refresh agents</button>' : ''}
+      </div>
+    </div>
+    <div class="command-remote-security"><span>ACCOUNT ISOLATED</span><span>3-MINUTE LOGIN TOKEN</span><span>DESKTOP-ONLY RIGHTS</span></div>
+    ${invite}
+    <div class="command-remote-devices">${rows || '<div class="command-empty">No MeshCentral agent is enrolled yet. Generate an installer link and run it on the target PC.</div>'}</div>`);
+}
+
+async function refreshRemote() {
+  try {
+    const data = await request('/remote/status');
+    renderRemote(data);
+    setNote('remote', data.warning || '', data.warning ? 'warn' : '');
+  } catch (error) {
+    setState('remote', false);
+    setBody('remote', '<div class="command-empty">Remote Desktop status is unavailable.</div>');
+    setNote('remote', error.message, 'error');
+  }
+}
+
+async function setupRemote() {
+  setNote('remote', 'Provisioning your private remote group...');
+  try {
+    const data = await request('/remote/setup', { method: 'POST' });
+    remoteInviteUrl = data.invite_url || '';
+    await refreshRemote();
+    toast('Remote Desktop installer is ready');
+  } catch (error) {
+    setNote('remote', error.message, 'error');
+  }
+}
+
+async function openRemoteConsole() {
+  setNote('remote', 'Creating a short-lived remote session...');
+  try {
+    const session = await request('/remote/session', { method: 'POST' });
+    const overlay = root.querySelector('[data-remote-overlay]');
+    const frame = root.querySelector('[data-remote-frame]');
+    if (!overlay || !frame) throw new Error('Remote console frame is unavailable');
+    frame.src = 'about:blank';
+    overlay.hidden = false;
+    document.body.classList.add('command-remote-open');
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = session.login_url;
+    form.target = frame.name;
+    form.hidden = true;
+    for (const [name, value] of [
+      ['action', 'login'],
+      ['username', session.token_user],
+      ['password', session.token_pass],
+    ]) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+    setNote('remote', 'Session credentials expire in three minutes; the active console remains account-scoped.');
+  } catch (error) {
+    setNote('remote', error.message, 'error');
+  }
+}
+
+function closeRemoteConsole() {
+  const overlay = root?.querySelector('[data-remote-overlay]');
+  const frame = root?.querySelector('[data-remote-frame]');
+  if (frame) frame.src = 'about:blank';
+  if (overlay) overlay.hidden = true;
+  document.body.classList.remove('command-remote-open');
+}
+
+async function copyRemoteInvite() {
+  if (!remoteInviteUrl) return;
+  await navigator.clipboard.writeText(new URL(remoteInviteUrl, window.location.origin).href);
+  toast('Remote installer link copied');
 }
 
 function renderPending(rows = []) {
@@ -734,11 +873,13 @@ function renderTimeline(payload) {
 }
 
 async function pcAction(action, args = {}, after) {
+  const deviceId = selectedDeviceId;
   try {
     const result = await request('/pc/action', {
       method: 'POST',
-      body: JSON.stringify({ action, args, device_id: selectedDeviceId || null }),
+      body: JSON.stringify({ action, args, device_id: deviceId || null }),
     });
+    if (deviceId !== selectedDeviceId) return null;
     if (result?.status === 'pending_confirmation') {
       toast(`${actionLabel(action)} is waiting for approval`);
       await refreshOverview();
@@ -753,8 +894,10 @@ async function pcAction(action, args = {}, after) {
 }
 
 async function refreshOverview() {
+  const deviceId = selectedDeviceId;
   try {
-    const data = await request(`/overview${selectedDeviceId ? `?device_id=${encodeURIComponent(selectedDeviceId)}` : ''}`);
+    const data = await request(`/overview${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`);
+    if (deviceId !== selectedDeviceId) return;
     latest.overview = data;
     renderVitals(data);
     setNote('vitals', data.error || '', data.online ? '' : 'warn');
@@ -786,12 +929,23 @@ async function refreshWindows() {
   }
 }
 
-async function refreshFiles(path = currentPath) {
+async function refreshFiles(path = currentPath, allowRootFallback = true) {
+  const requestedPath = String(path || '').trim();
   try {
-    const payload = await pcAction('file_list', { path, limit: 160 }, renderFiles);
+    const payload = await pcAction('file_list', { path: requestedPath, limit: 160 }, renderFiles);
     if (payload?.entries) renderFiles(payload);
     setNote('files', '');
   } catch (error) {
+    const canReset = allowRootFallback
+      && requestedPath
+      && /path does not exist|outside shadow_allowed_roots|not a directory/i.test(error.message);
+    if (canReset) {
+      currentPath = '';
+      lastReadFile = null;
+      latest.files = null;
+      setNote('files', 'The previous device path was invalid. Resetting to this PC\'s allowed root.', 'warn');
+      return refreshFiles('', false);
+    }
     setNote('files', error.message, 'error');
     setState('files', false);
   }
@@ -855,7 +1009,158 @@ async function captureScreen() {
   }
 }
 
+// ── Browser panel (server-side per-account Chromium; device-independent) ──
+
+const BROWSER_API = '/api/browser';
+
+async function browserRequest(path, options = {}) {
+  const response = await fetch(`${BROWSER_API}${path}`, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function renderBrowser(data) {
+  latest.browser = data;
+  setState('browser', Boolean(data?.open));
+  if (!data?.available) {
+    setBody('browser', `
+      <div class="command-empty">Browser engine is not installed on the server.<br>
+      <code>pip install playwright &amp;&amp; python -m playwright install chromium</code></div>`);
+    return;
+  }
+  const pending = Array.isArray(data.pending) ? data.pending : [];
+  const history = Array.isArray(data.history) ? data.history : [];
+  const pendingHtml = pending.length ? `
+    <div class="command-pending">
+      <div class="command-pending-title">Browser approval required — nothing runs until you decide</div>
+      ${pending.map((item) => `
+        <div class="command-pending-row">
+          <div>
+            <strong>${esc(item.action)}</strong>
+            <small>${esc(item.reason || '')}${item.page ? ` · ${esc(item.page)}` : ''}</small>
+          </div>
+          <div class="command-inline-actions">
+            <button type="button" class="command-btn approve" data-browser-approve="${esc(item.id)}">Approve</button>
+            <button type="button" class="command-btn" data-browser-cancel="${esc(item.id)}">Deny</button>
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+  const historyHtml = history.length ? `
+    <div class="command-browser-history">
+      ${history.slice(-8).reverse().map((h) => `
+        <div class="command-browser-history-row" data-ok="${h.ok ? '1' : '0'}" data-gated="${h.gated ? '1' : '0'}">
+          <span>${esc(h.action)}</span><small>${esc(h.detail || '')}</small>
+        </div>`).join('')}
+    </div>` : '';
+  const shot = data.open ? `
+    <button type="button" class="command-screen-wrap" data-command-action="browser-shot" title="Click to refresh the page capture.">
+      <img id="command-browser-shot" src="${BROWSER_API}/screenshot?ts=${Date.now()}" alt="Browser page" loading="lazy" />
+    </button>` : '<div class="command-empty">Browser is idle. Open a URL below — logins persist in your private server-side profile.</div>';
+  setBody('browser', `
+    ${shot}
+    ${data.title || data.url ? `<div class="command-browser-now"><strong>${esc(data.title || '')}</strong><small>${esc(data.url || '')}</small></div>` : ''}
+    <div class="command-browser-bar">
+      <input type="text" id="command-browser-input" placeholder="URL or search — or: click <text> · js <code> · read · back"
+             autocomplete="off" spellcheck="false" />
+      <button type="button" class="command-btn approve" data-command-action="browser-go">Go</button>
+    </div>
+    <div class="command-button-grid">
+      <button type="button" class="command-btn" data-command-action="browser-read">Read page</button>
+      <button type="button" class="command-btn" data-command-action="browser-back">Back</button>
+      <button type="button" class="command-btn" data-command-action="browser-shot">Refresh capture</button>
+      <button type="button" class="command-btn danger" data-command-action="browser-close">Close browser</button>
+    </div>
+    ${pendingHtml}
+    ${historyHtml}`);
+}
+
+async function refreshBrowser(force = false) {
+  // Don't clobber the panel mid-typing on the periodic refresh.
+  if (!force && document.activeElement?.id === 'command-browser-input') return;
+  try {
+    const data = await browserRequest('/status');
+    renderBrowser(data);
+  } catch (error) {
+    setState('browser', false);
+    setBody('browser', '<div class="command-empty">Browser status unavailable.</div>');
+    setNote('browser', error.message, 'error');
+  }
+}
+
+async function browserAction(action, params = {}, note = '') {
+  try {
+    const result = await browserRequest('/action', { method: 'POST', body: JSON.stringify({ action, ...params }) });
+    if (result?.status === 'pending_confirmation') {
+      toast('That action needs your approval — see the Browser panel');
+    } else if (note) {
+      toast(note);
+    }
+    await refreshBrowser(true);
+    return result;
+  } catch (error) {
+    toast(`Browser ${action} failed: ${error.message}`, true);
+    await refreshBrowser(true);
+    return null;
+  }
+}
+
+function runBrowserCommand(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return undefined;
+  if (/^click\s+/i.test(text)) return browserAction('click', { text: text.replace(/^click\s+/i, '') });
+  if (/^js\s+/i.test(text)) return browserAction('eval', { js: text.replace(/^js\s+/i, '') });
+  if (/^read$/i.test(text)) return browserReadPage();
+  if (/^back$/i.test(text)) return browserAction('back');
+  const isUrl = /^https?:\/\//i.test(text) || (text.includes('.') && !text.includes(' '));
+  const url = isUrl ? text : `https://duckduckgo.com/?q=${encodeURIComponent(text)}`;
+  return browserAction('navigate', { url }, 'Page opened');
+}
+
+async function browserReadPage() {
+  const result = await browserAction('read', { max_chars: 1200 });
+  if (result?.text) setNote('browser', result.text.slice(0, 400), '');
+  return result;
+}
+
+async function browserApprovePending(id) {
+  try {
+    await browserRequest(`/confirm/${encodeURIComponent(id)}`, { method: 'POST' });
+    toast('Browser action executed');
+  } catch (error) {
+    toast(`Approval failed: ${error.message}`, true);
+  }
+  return refreshBrowser(true);
+}
+
+async function browserCancelPending(id) {
+  try {
+    await browserRequest(`/pending/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    toast('Browser action cancelled');
+  } catch (error) {
+    toast(`Cancel failed: ${error.message}`, true);
+  }
+  return refreshBrowser(true);
+}
+
+async function browserClose() {
+  try {
+    await browserRequest('/close', { method: 'POST' });
+    toast('Browser closed (profile kept)');
+  } catch (error) {
+    toast(`Browser close failed: ${error.message}`, true);
+  }
+  return refreshBrowser(true);
+}
+
 async function refreshAll({ includeScreen = false, skipAccess = false } = {}) {
+  refreshBrowser();
   if (!skipAccess && !(await refreshDevices())) return;
   if (!selectedDeviceId) return;
   await Promise.allSettled([
@@ -1068,6 +1373,12 @@ async function inspectScreen() {
 }
 
 function bindEvents() {
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target?.id === 'command-browser-input') {
+      event.preventDefault();
+      runBrowserCommand(event.target.value);
+    }
+  });
   root.addEventListener('click', async (event) => {
     const target = event.target.closest('button, .command-file, .command-chip, label');
     if (!target) return;
@@ -1105,6 +1416,10 @@ function bindEvents() {
     if (approveId) return approvePending(approveId);
     const cancelId = target.dataset.pendingCancel;
     if (cancelId) return cancelPending(cancelId);
+    const browserApproveId = target.dataset.browserApprove;
+    if (browserApproveId) return browserApprovePending(browserApproveId);
+    const browserCancelId = target.dataset.browserCancel;
+    if (browserCancelId) return browserCancelPending(browserCancelId);
     const removeIndex = target.dataset.generatedRemove;
     if (removeIndex !== undefined) {
       generatedPanels.splice(Number(removeIndex), 1);
@@ -1141,6 +1456,16 @@ function bindEvents() {
 
     const action = target.dataset.commandAction;
     if (!action) return;
+    if (action === 'browser-go') return runBrowserCommand(root.querySelector('#command-browser-input')?.value);
+    if (action === 'browser-read') return browserReadPage();
+    if (action === 'browser-back') return browserAction('back');
+    if (action === 'browser-shot') return refreshBrowser(true);
+    if (action === 'browser-close') return browserClose();
+    if (action === 'remote-setup') return setupRemote();
+    if (action === 'remote-open') return openRemoteConsole();
+    if (action === 'remote-close') return closeRemoteConsole();
+    if (action === 'remote-refresh') return refreshRemote();
+    if (action === 'remote-copy') return copyRemoteInvite();
     if (action === 'close') return closePage();
     if (action === 'refresh') return refreshAll({ includeScreen: false });
     if (action === 'screen') return captureScreen();
@@ -1168,7 +1493,7 @@ function bindEvents() {
     if (action === 'file-list') return refreshFiles(root.querySelector('#command-file-path')?.value || currentPath);
     if (action === 'file-up') {
       const path = root.querySelector('#command-file-path')?.value || currentPath;
-      return refreshFiles(path.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/');
+      return refreshFiles(parentPath(path));
     }
     if (action === 'file-search') {
       const query = root.querySelector('#command-file-query')?.value || '';
@@ -1201,8 +1526,8 @@ function bindEvents() {
     if (!input?.files?.length) return;
     const file = input.files[0];
     const text = await file.text();
-    const base = (root.querySelector('#command-file-path')?.value || currentPath || '').replace(/\/+$/, '');
-    await pcAction('file_write', { path: `${base}/${file.name}`, text });
+    const base = root.querySelector('#command-file-path')?.value || currentPath || '';
+    await pcAction('file_write', { path: joinPath(base, file.name), text });
     input.value = '';
   });
 }
@@ -1237,6 +1562,8 @@ function ensureRoot() {
 async function bootstrapPage() {
   stopTimers();
   const allowed = await refreshDevices();
+  await refreshRemote();
+  await refreshBrowser();
   if (!allowed) return;
   startTimers();
   await refreshAll({ includeScreen: false, skipAccess: true });
@@ -1256,6 +1583,7 @@ function closePage() {
   document.body.classList.remove('command-page-open');
   stopTimers();
   stopEnrollmentTimer();
+  closeRemoteConsole();
   if (window.location.pathname === '/command') navTo('/');
 }
 
