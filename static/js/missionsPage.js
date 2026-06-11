@@ -10,9 +10,11 @@ let refreshTimer = null;
 let state = {
   workspaces: [],
   missions: [],
+  sessions: [],
   models: [],
   devices: [],
   activeMission: null,     // full mission record
+  activeSession: null,     // full agent-session record
   activeWorkspace: null,   // workspace id selected in explorer
   tree: null,
   openFile: null,          // {path, text, sha256, dirty}
@@ -88,6 +90,12 @@ const MODES = [
     body: 'Shadow reads, edits, and runs ordinary project commands in this workspace without interrupting. Destructive, privileged, networked, or out-of-workspace actions still ask first. Approvals last only for the mission or session.',
   },
   {
+    id: 'unattended',
+    title: 'Unattended',
+    badge: 'Autonomous',
+    body: 'Shadow works in this workspace without ever asking: edits, project commands, tests, package installs, network access, and safe git operations run immediately. Privilege escalation, destructive git, secrets, and anything outside the workspace are refused automatically. Stays enabled until you disable it.',
+  },
+  {
     id: 'full',
     title: 'Full access',
     badge: 'Dangerous',
@@ -132,6 +140,14 @@ function openModeSelector({ current, deviceId, onPick }) {
     const mode = MODES[index].id;
     if (mode === 'full') {
       const ok = await armFullAccessFlow(deviceId);
+      if (!ok) return;
+    }
+    if (mode === 'unattended' && current !== 'unattended') {
+      const ok = window.confirm(
+        'Enable Unattended mode for this workspace?\n\n'
+        + 'Shadow will edit files, run project commands, install packages, and use the '
+        + 'network here without asking for approval. Dangerous operations are refused '
+        + 'automatically. This setting persists until you disable it.');
       if (!ok) return;
     }
     closeModeSelector();
@@ -218,9 +234,9 @@ function buildShell() {
     <div class="missions-inner">
       <header class="missions-top">
         <div>
-          <div class="missions-kicker">SHADOW // MISSIONS</div>
-          <h2>Autonomous Missions</h2>
-          <p>Open a project, assign a goal, approve what matters. Everything else is policy-gated.</p>
+          <div class="missions-kicker">SHADOW // AGENT</div>
+          <h2>Agent</h2>
+          <p>Agent sessions for direct coding tasks. Missions for large multi-stage goals.</p>
         </div>
         <div class="missions-top-actions">
           <button type="button" class="missions-btn" data-act="permissions">Update model permissions</button>
@@ -229,8 +245,26 @@ function buildShell() {
           <button type="button" class="missions-close" data-act="close" aria-label="Close">✕</button>
         </div>
       </header>
+      <div id="missions-unattended-strip"></div>
       <div class="missions-layout">
         <aside class="missions-side">
+          <div class="missions-panel" id="missions-agent-composer">
+            <h4>New agent session</h4>
+            <select id="agent-workspace" aria-label="Workspace"></select>
+            <select id="agent-model" aria-label="Model"></select>
+            <textarea id="agent-task" rows="3" placeholder="e.g. Fix the failing test in tests/test_utils.py and run the suite"></textarea>
+            <label class="missions-checkbox"><input type="checkbox" id="agent-fallback" />
+              Fall back to other models automatically</label>
+            <div class="missions-mode-row">
+              <span>Mode: <strong id="agent-ws-mode">—</strong></span>
+              <button type="button" class="missions-btn small" data-act="agent-ws-mode">Change</button>
+            </div>
+            <button type="button" class="missions-btn primary" data-act="agent-run">Run</button>
+          </div>
+          <div class="missions-panel">
+            <h4>Sessions</h4>
+            <div id="agent-sessions"></div>
+          </div>
           <div class="missions-panel" id="missions-workspaces-panel">
             <h4>Workspaces</h4>
             <div id="missions-workspaces"></div>
@@ -276,7 +310,8 @@ async function refreshWorkspaces() {
   container.innerHTML = state.workspaces.map((ws) => `
     <div class="missions-row" data-workspace="${esc(ws.id)}">
       <div>
-        <strong>${esc(ws.name)}</strong>
+        <strong>${esc(ws.name)}
+          ${ws.mode === 'unattended' ? '<span class="missions-badge" data-kind="unattended">UNATTENDED</span>' : ''}</strong>
         <small>${esc(ws.device_name || ws.device_id)} · ${esc(ws.root)} · mode: ${esc(ws.mode)}</small>
       </div>
       <div class="missions-row-actions">
@@ -285,7 +320,40 @@ async function refreshWorkspaces() {
         <button type="button" class="missions-btn small danger" data-workspace-remove="${esc(ws.id)}">✕</button>
       </div>
     </div>`).join('') || '<div class="missions-empty">No folders authorized yet.</div>';
+  renderAgentWorkspaceSelect();
+  renderUnattendedStrip();
   renderFullAccessBanner();
+}
+
+function renderAgentWorkspaceSelect() {
+  const select = root.querySelector('#agent-workspace');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = state.workspaces.map((ws) => `
+    <option value="${esc(ws.id)}">${esc(ws.name)} — ${esc(ws.device_name || ws.device_id)}</option>`)
+    .join('') || '<option value="">No workspaces authorized</option>';
+  if (previous && state.workspaces.some((w) => w.id === previous)) select.value = previous;
+  updateAgentModeLabel();
+}
+
+function updateAgentModeLabel() {
+  const select = root.querySelector('#agent-workspace');
+  const label = root.querySelector('#agent-ws-mode');
+  if (!select || !label) return;
+  const ws = state.workspaces.find((w) => w.id === select.value);
+  label.textContent = ws ? ws.mode : '—';
+  label.dataset.unattended = ws?.mode === 'unattended' ? '1' : '0';
+}
+
+function renderUnattendedStrip() {
+  const strip = root.querySelector('#missions-unattended-strip');
+  if (!strip) return;
+  const unattended = state.workspaces.filter((w) => w.mode === 'unattended');
+  strip.innerHTML = unattended.map((ws) => `
+    <div class="missions-unattended">
+      <span>● UNATTENDED — <strong>${esc(ws.name)}</strong> runs without approval prompts</span>
+      <button type="button" class="missions-btn small" data-unattended-off="${esc(ws.id)}">Disable</button>
+    </div>`).join('');
 }
 
 async function addWorkspaceFlow() {
@@ -337,15 +405,27 @@ async function refreshMissions() {
   }).join('') || '<div class="missions-empty">No missions yet.</div>';
 }
 
+function modelOptions() {
+  return state.models.flatMap((ep) =>
+    (ep.models || []).map((m) => ({ id: `${ep.endpoint_id}|${m}`, label: `${m} @ ${ep.endpoint_name}` })));
+}
+
 async function refreshModels() {
   try {
     const data = await request('/models');
     state.models = data.available || [];
   } catch (_) { state.models = []; }
+  const agentSelect = root.querySelector('#agent-model');
+  if (agentSelect) {
+    const previous = agentSelect.value;
+    const opts = modelOptions();
+    agentSelect.innerHTML = opts.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('')
+      || '<option value="">No model endpoints configured</option>';
+    if (previous && opts.some((o) => o.id === previous)) agentSelect.value = previous;
+  }
   const container = root.querySelector('#missions-roles');
   if (!container) return;
-  const options = state.models.flatMap((ep) =>
-    (ep.models || []).map((m) => ({ id: `${ep.endpoint_id}|${m}`, label: `${m} @ ${ep.endpoint_name}` })));
+  const options = modelOptions();
   if (!options.length) {
     container.innerHTML = '<div class="missions-empty">No model endpoints configured.</div>';
     return;
@@ -386,11 +466,185 @@ async function createMission() {
   }
 }
 
+// ── agent sessions (direct tool loop) ──────────────────────────────────
+
+async function refreshSessions() {
+  try {
+    const data = await request('/sessions');
+    state.sessions = data.sessions || [];
+  } catch (_) { state.sessions = []; }
+  const container = root.querySelector('#agent-sessions');
+  if (!container) return;
+  container.innerHTML = state.sessions.map((s) => `
+    <div class="missions-row" data-selected="${state.activeSession?.id === s.id ? '1' : '0'}">
+      <div>
+        <strong>${esc((s.task || '').slice(0, 70))}</strong>
+        <small>${esc(s.status)}${s.retryable ? ' · retryable' : ''}${s.pending_approvals ? ` · ⚠ ${s.pending_approvals} approval(s)` : ''}
+          · ${esc(s.model || '')}${s.files_changed ? ` · ${s.files_changed} file(s)` : ''}</small>
+      </div>
+      <button type="button" class="missions-btn small" data-open-session="${esc(s.id)}">Open</button>
+    </div>`).join('') || '<div class="missions-empty">No sessions yet.</div>';
+}
+
+async function runAgentSession() {
+  const task = root.querySelector('#agent-task')?.value?.trim();
+  const workspaceId = root.querySelector('#agent-workspace')?.value;
+  const modelValue = root.querySelector('#agent-model')?.value;
+  const autoFallback = root.querySelector('#agent-fallback')?.checked || false;
+  if (!task || task.length < 4) { toast('Describe the task first', true); return; }
+  if (!workspaceId) { toast('Authorize a workspace folder first', true); return; }
+  if (!modelValue) { toast('Configure a model endpoint first', true); return; }
+  const [endpointId, ...modelParts] = modelValue.split('|');
+  const fallbacks = autoFallback
+    ? modelOptions().filter((o) => o.id !== modelValue).slice(0, 3).map((o) => {
+        const [eid, ...m] = o.id.split('|');
+        return { endpoint_id: eid, model: m.join('|') };
+      })
+    : [];
+  try {
+    toast('Starting session…');
+    const session = await request('/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        task,
+        endpoint_id: endpointId,
+        model: modelParts.join('|'),
+        fallbacks,
+        auto_fallback: autoFallback,
+      }),
+    });
+    root.querySelector('#agent-task').value = '';
+    state.activeSession = session;
+    state.activeMission = null;
+    state.activeWorkspace = null;
+    await refreshSessions();
+    renderSession();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function openSession(sessionId) {
+  try {
+    state.activeSession = await request(`/sessions/${encodeURIComponent(sessionId)}`);
+    state.activeMission = null;
+    state.activeWorkspace = null;
+    renderSession();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderSessionApprovals(session) {
+  const pending = (session.approvals || []).filter((a) => a.status === 'pending');
+  if (!pending.length) return '';
+  return pending.map((a) => `
+    <div class="missions-approval" data-risk="${esc(a.risk)}">
+      <div>
+        <strong>${esc(a.summary)}</strong>
+        <small>${esc(a.reason)} · capability: ${esc(a.capability)} · risk: ${esc(a.risk)}</small>
+        ${a.args?.command ? `<code>${esc(a.args.command)}</code>` : ''}
+      </div>
+      <div class="missions-approval-actions">
+        <button type="button" class="missions-btn small" data-session-approve="${a.id}|allow_once">Allow once</button>
+        <button type="button" class="missions-btn small" data-session-approve="${a.id}|allow_session">Allow for this session</button>
+        <button type="button" class="missions-btn small" data-session-approve="${a.id}|allow_always">Always allow in this workspace</button>
+        <button type="button" class="missions-btn small danger" data-session-approve="${a.id}|decline">Decline</button>
+        <button type="button" class="missions-btn small danger" data-session-approve="${a.id}|stop_session">Stop session</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderSessionTimeline(session) {
+  return `<div class="missions-events">${(session.events || []).slice(-150).reverse().map((e) => `
+    <div class="missions-event" data-kind="${esc(e.kind)}">
+      <span>${new Date(e.ts * 1000).toLocaleTimeString()}</span>
+      <strong>${esc(e.kind)}</strong>
+      <span>${esc(e.text)}</span>
+    </div>`).join('') || '<div class="missions-empty">No activity yet.</div>'}</div>`;
+}
+
+function renderSessionTerminal(session) {
+  const blocks = (session.terminal || []).slice(-12);
+  if (!blocks.length) return '<div class="missions-empty">No commands executed yet.</div>';
+  return blocks.map((t) => `
+    <div class="missions-terminal-block">
+      <h5>$ ${esc(t.command)} <small>(exit ${t.returncode ?? '?'}, ${t.seconds ?? '?'}s)</small></h5>
+      <pre class="missions-output">${esc(t.stdout || '')}${t.stderr ? `\n--- stderr ---\n${esc(t.stderr)}` : ''}</pre>
+    </div>`).join('');
+}
+
+function renderSession() {
+  const session = state.activeSession;
+  const container = root.querySelector('#missions-detail');
+  if (!container) return;
+  if (!session) { container.innerHTML = '<div class="missions-empty">Nothing selected.</div>'; return; }
+  const workspace = state.workspaces.find((w) => w.id === session.workspace_id);
+  const running = ['running', 'waiting_approval'].includes(session.status);
+  const failed = session.status === 'failed';
+  const finished = ['completed', 'rolled_back'].includes(session.status);
+  const opts = modelOptions();
+  container.innerHTML = `
+    <div class="missions-detail-head">
+      <div>
+        <h3>${esc((session.task || '').slice(0, 120))}</h3>
+        <small>status: <strong>${esc(session.status)}</strong>
+          · ${esc(session.workspace_name || session.workspace_id)}
+          · model: ${esc((session.model || {}).model || '')}</small>
+      </div>
+      <div class="missions-detail-actions">
+        ${running ? '<button type="button" class="missions-btn small danger" data-act="session-stop">Stop</button>' : ''}
+        ${['stopped', 'failed'].includes(session.status) ? '<button type="button" class="missions-btn small primary" data-act="session-resume">Resume</button>' : ''}
+        ${!running && session.checkpoint ? '<button type="button" class="missions-btn small danger" data-act="session-rollback">Roll back</button>' : ''}
+      </div>
+    </div>
+    ${workspace?.mode === 'unattended' ? `
+      <div class="missions-unattended">
+        <span>● UNATTENDED — Shadow acts in <strong>${esc(workspace.name)}</strong> without approval prompts</span>
+        <button type="button" class="missions-btn small" data-unattended-off="${esc(workspace.id)}">Disable</button>
+      </div>` : ''}
+    ${failed ? `
+      <div class="missions-provider-error">
+        <strong>✘ ${esc(session.error || 'Session failed')}</strong>
+        ${session.provider_error ? `<small>${esc(session.provider_error)}</small>` : ''}
+        <div class="missions-clarify-row">
+          <select id="session-retry-model">${opts.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('')}</select>
+          <button type="button" class="missions-btn small primary" data-act="session-retry">Retry with this model</button>
+        </div>
+      </div>` : ''}
+    ${renderSessionApprovals(session)}
+    <div class="missions-session-grid">
+      <div>
+        <h5>Activity</h5>
+        ${renderSessionTimeline(session)}
+      </div>
+      <div>
+        <h5>Terminal</h5>
+        ${renderSessionTerminal(session)}
+      </div>
+    </div>
+    <h5>Files changed (${(session.files_changed || []).length})</h5>
+    <div class="missions-chips">${(session.files_changed || []).map((f) =>
+      `<span class="missions-chip">${esc(f)} <button type="button" data-session-revert="${esc(f)}" title="Revert this file">↩</button></span>`).join('') || 'none yet'}</div>
+    <div class="missions-clarify-row" style="margin-top:6px">
+      <button type="button" class="missions-btn small" data-act="session-diff">View diff</button>
+    </div>
+    <div id="agent-session-diff"></div>
+    ${session.report ? `<h5>Report</h5><div class="missions-report">${esc(session.report).replace(/\n/g, '<br/>')}</div>` : ''}
+    <h5>Follow-up</h5>
+    <div class="missions-clarify-row">
+      <input type="text" id="session-followup" placeholder="${finished ? 'Send a follow-up task to continue this session' : 'Message the agent (queued between steps)'}" />
+      <button type="button" class="missions-btn small primary" data-act="session-send">Send</button>
+    </div>`;
+}
+
 // ── mission detail ─────────────────────────────────────────────────────
 
 async function openMission(missionId) {
   try {
     state.activeMission = await request(`/${encodeURIComponent(missionId)}`);
+    state.activeSession = null;
     state.activeWorkspace = null;
     state.tab = state.tab === 'explorer' ? 'overview' : state.tab;
     renderMission();
@@ -619,6 +873,7 @@ async function inlineApprovalFlow(workspaceId, info) {
 async function openWorkspace(workspaceId) {
   state.activeWorkspace = workspaceId;
   state.activeMission = null;
+  state.activeSession = null;
   state.openFile = null;
   state.tab = 'explorer';
   const container = root.querySelector('#missions-detail');
@@ -806,6 +1061,13 @@ function bindEvents() {
       event.preventDefault();
       runSearch();
     }
+    if (event.key === 'Enter' && event.target?.id === 'session-followup') {
+      event.preventDefault();
+      root.querySelector('[data-act="session-send"]')?.click();
+    }
+  });
+  root.addEventListener('change', (event) => {
+    if (event.target?.id === 'agent-workspace') updateAgentModeLabel();
   });
   root.addEventListener('click', async (event) => {
     const target = event.target.closest('button');
@@ -815,7 +1077,33 @@ function bindEvents() {
 
     try {
       if (target.dataset.openMission) return openMission(target.dataset.openMission);
+      if (target.dataset.openSession) return openSession(target.dataset.openSession);
       if (target.dataset.openWorkspace) return openWorkspace(target.dataset.openWorkspace);
+      if (target.dataset.unattendedOff) {
+        await request(`/workspaces/${encodeURIComponent(target.dataset.unattendedOff)}/mode`, {
+          method: 'PUT', body: JSON.stringify({ mode: 'auto' }),
+        });
+        toast('Unattended mode disabled');
+        await refreshWorkspaces();
+        if (state.activeSession) renderSession();
+        return;
+      }
+      if (target.dataset.sessionApprove && state.activeSession) {
+        const [approvalId, decision] = target.dataset.sessionApprove.split('|');
+        await request(`/sessions/${state.activeSession.id}/approvals/${approvalId}`, {
+          method: 'POST', body: JSON.stringify({ decision }),
+        });
+        toast(`Approval: ${decision.replaceAll('_', ' ')}`);
+        return openSession(state.activeSession.id);
+      }
+      if (target.dataset.sessionRevert && state.activeSession) {
+        if (!confirm(`Revert ${target.dataset.sessionRevert} to its pre-session state?`)) return;
+        await request(`/sessions/${state.activeSession.id}/rollback`, {
+          method: 'POST', body: JSON.stringify({ paths: [target.dataset.sessionRevert] }),
+        });
+        toast('File reverted');
+        return openSession(state.activeSession.id);
+      }
       if (target.dataset.workspaceRemove) {
         if (!confirm('Revoke this workspace authorization?')) return;
         await request(`/workspaces/${encodeURIComponent(target.dataset.workspaceRemove)}`, { method: 'DELETE' });
@@ -856,6 +1144,65 @@ function bindEvents() {
         case 'close': return closePage();
         case 'refresh': return bootstrapPage();
         case 'rules': return openRulesModal();
+        case 'agent-run': return runAgentSession();
+        case 'agent-ws-mode': {
+          const ws = state.workspaces.find((w) => w.id === root.querySelector('#agent-workspace')?.value);
+          if (!ws) return toast('Authorize a workspace first', true);
+          return openModeSelector({
+            current: ws.mode, deviceId: ws.device_id,
+            onPick: async (mode) => {
+              await request(`/workspaces/${encodeURIComponent(ws.id)}/mode`, {
+                method: 'PUT', body: JSON.stringify({ mode }),
+              });
+              toast(`Workspace mode: ${mode}`);
+              await refreshWorkspaces();
+            },
+          });
+        }
+        case 'session-stop': {
+          await request(`/sessions/${state.activeSession.id}/stop`, { method: 'POST' });
+          return openSession(state.activeSession.id);
+        }
+        case 'session-resume': {
+          await request(`/sessions/${state.activeSession.id}/resume`, { method: 'POST' });
+          return openSession(state.activeSession.id);
+        }
+        case 'session-retry': {
+          const pick = root.querySelector('#session-retry-model')?.value || '';
+          const [endpointId, ...modelParts] = pick.split('|');
+          await request(`/sessions/${state.activeSession.id}/retry`, {
+            method: 'POST',
+            body: JSON.stringify(pick ? { endpoint_id: endpointId, model: modelParts.join('|') } : {}),
+          });
+          toast('Retrying…');
+          return openSession(state.activeSession.id);
+        }
+        case 'session-rollback': {
+          if (!confirm('Roll back ALL files this session changed?')) return;
+          await request(`/sessions/${state.activeSession.id}/rollback`, {
+            method: 'POST', body: JSON.stringify({}),
+          });
+          toast('Session rolled back');
+          return openSession(state.activeSession.id);
+        }
+        case 'session-send': {
+          const input = root.querySelector('#session-followup');
+          const text = input?.value?.trim();
+          if (!text) return;
+          await request(`/sessions/${state.activeSession.id}/message`, {
+            method: 'POST', body: JSON.stringify({ text }),
+          });
+          input.value = '';
+          toast('Message sent');
+          return openSession(state.activeSession.id);
+        }
+        case 'session-diff': {
+          const out = root.querySelector('#agent-session-diff');
+          out.innerHTML = '<div class="missions-empty">Loading diff…</div>';
+          const diff = await wsAction(state.activeSession.workspace_id, 'git_diff', {});
+          out.innerHTML = diff.diff ? renderDiffText(diff.diff) : '<div class="missions-empty">No uncommitted diff.</div>';
+          return;
+        }
         case 'permissions': {
           const ws = state.workspaces.find((w) => w.id === (state.activeWorkspace || mission?.workspace_id)) || state.workspaces[0];
           if (!ws) return toast('Authorize a workspace first', true);
@@ -1026,7 +1373,7 @@ async function runSearch() {
 async function bootstrapPage() {
   stopTimers();
   try {
-    await Promise.all([refreshWorkspaces(), refreshMissions(), refreshModels()]);
+    await Promise.all([refreshWorkspaces(), refreshMissions(), refreshSessions(), refreshModels()]);
   } catch (error) {
     toast(error.message, true);
   }
@@ -1039,10 +1386,20 @@ function startTimers() {
     if (document.hidden || !root || root.hidden) return;
     try {
       await refreshMissions();
+      await refreshSessions();
       const mission = state.activeMission;
       if (mission && ['running', 'paused_approval', 'planning'].includes(mission.status)) {
         state.activeMission = await request(`/${mission.id}`);
         renderMission();
+      }
+      const session = state.activeSession;
+      if (session && ['running', 'waiting_approval', 'created'].includes(session.status)) {
+        const followup = root.querySelector('#session-followup');
+        const draft = followup?.value || '';
+        state.activeSession = await request(`/sessions/${session.id}`);
+        renderSession();
+        const restored = root.querySelector('#session-followup');
+        if (restored && draft) restored.value = draft;
       }
       renderFullAccessBanner();
     } catch (_) { /* transient */ }

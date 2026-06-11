@@ -119,4 +119,22 @@
 .missions-diff-line[data-kind="del"]{color:#ff9c9c;background:rgba(255,99,99,.08)}
 .missions-diff-line[data-kind="hunk"]{color:#9ecbff}
 .missions-diff-line[data-kind="meta"]{opacity:.55}
+/* agent sessions */
+#missions-agent-composer select{width:100%;box-sizing:border-box;background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:7px;font-size:12.5px;margin-bottom:7px}
+#missions-agent-composer textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.14);color:inherit;border-radius:8px;padding:8px;font-size:13px;resize:vertical}
+#agent-ws-mode[data-unattended="1"]{color:#ffd479}
+.missions-unattended{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid rgba(255,196,87,.45);background:rgba(255,196,87,.08);border-radius:10px;padding:7px 12px;margin:0 0 10px;font-size:12.5px;color:#ffd479}
+.missions-unattended strong{color:inherit}
+.missions-badge[data-kind="unattended"]{color:#ffd479;border-color:rgba(255,196,87,.45)}
+.missions-badge[data-kind="completed"]{color:#7ee8b0;border-color:rgba(57,217,138,.4)}
+.missions-badge[data-kind="stopped"],.missions-badge[data-kind="waiting_approval"]{color:#ffae5e;border-color:rgba(255,150,60,.4)}
+.missions-provider-error{border:1px solid rgba(255,99,99,.5);background:rgba(255,99,99,.06);border-radius:10px;padding:11px;margin:8px 0;font-size:13px}
+.missions-provider-error strong{display:block;color:#ff9c9c}
+.missions-provider-error small{display:block;opacity:.7;margin:4px 0;word-break:break-all}
+.missions-provider-error select{background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px;flex:1}
+.missions-session-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+@media (max-width:1100px){.missions-session-grid{grid-template-columns:1fr}}
+.missions-session-grid>div{min-width:0}
+.missions-session-grid .missions-events{max-height:420px;overflow:auto}
+.missions-terminal-block h5{margin:8px 0 4px;font:11.5px ui-monospace,monospace;text-transform:none;letter-spacing:0;opacity:.85;word-break:break-all}
 body.missions-page-open{overflow:hidden}
