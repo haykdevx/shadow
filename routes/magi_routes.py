@@ -45,6 +45,13 @@ class MagiDeliberationRequest(BaseModel):
     roles: list[MagiModelSelection] = Field(default_factory=list, max_length=3)
     judge: MagiModelSelection | None = None
     timeout_seconds: int = Field(default=180, ge=10, le=600)
+    # Confidence-weighted voting: stances are ranked by summed unit
+    # confidence instead of head count.
+    weighted: bool = False
+    # Evidence grounding: fetch one shared source (browser) before fan-out so
+    # all units reason over the same retrieved text. Opt-in per query.
+    evidence: bool = False
+    evidence_query: str | None = Field(default=None, max_length=2000)
 
 
 def _safe_json_list(raw: Any) -> list[str]:
@@ -221,6 +228,28 @@ def _resolve_judge(payload: MagiDeliberationRequest, owner: str) -> dict[str, An
     return target
 
 
+async def _gather_evidence(owner: str, payload: MagiDeliberationRequest) -> tuple[dict[str, Any] | None, str | None]:
+    """Fetch one shared evidence source through the owner's agent browser.
+
+    Failures degrade to evidence-free deliberation — a dead source must never
+    abort the MAGI run. Returns (evidence, error_message).
+    """
+    if not payload.evidence:
+        return None, None
+    instruction = (payload.evidence_query or payload.query or "").strip()[:2000]
+    try:
+        from src.browser_manager import BrowserError, run_browse_task
+
+        result = await asyncio.wait_for(run_browse_task(owner, instruction), timeout=60)
+        return {"url": result.get("url"), "title": result.get("title"), "text": result.get("text")}, None
+    except (BrowserError, asyncio.TimeoutError) as exc:
+        logger.warning("MAGI evidence gathering failed: %s", exc)
+        return None, str(exc)[:300]
+    except Exception as exc:  # noqa: BLE001 — never let evidence kill the deliberation
+        logger.warning("MAGI evidence gathering crashed: %s", exc)
+        return None, f"evidence retrieval failed: {str(exc)[:200]}"
+
+
 def setup_magi_routes(session_manager) -> APIRouter:
     router = APIRouter(prefix="/api/magi", tags=["magi"])
     orchestrator = MagiOrchestrator()
@@ -261,7 +290,10 @@ def setup_magi_routes(session_manager) -> APIRouter:
                 "final": "string",
                 "decision": "APPROVE|REJECT|CONDITIONAL|null",
                 "mode": "vote|judge|debate",
-                "resolution": "vote|debate_vote|judge|judge_deadlock|vote_fallback|deadlock_unresolved",
+                "resolution": "vote|debate_vote|judge|judge_escalated|vote_fallback|deadlock_unresolved",
+                "weighted": "boolean (confidence-weighted voting)",
+                "evidence": "null | {url, title, chars} (shared retrieved evidence)",
+                "model_diversity": "{unique_models, total_units, warning: string|null}",
                 "agreement": "unanimous|majority|deadlock|insufficient|malfunction",
                 "degraded": "boolean",
                 "magi": [{
@@ -272,7 +304,7 @@ def setup_magi_routes(session_manager) -> APIRouter:
                     "next_step": "string", "status": "answered|debated|malfunction",
                     "repaired": "boolean", "latency_ms": "number",
                 }],
-                "vote": {"winner": "string|null", "counts": {"STANCE": "number"}, "avg_confidence": "number 0..1|null", "dissent_count": "number"},
+                "vote": {"winner": "string|null", "counts": {"STANCE": "number"}, "weights": {"STANCE": "number (summed confidence)"}, "weighted": "boolean", "avg_confidence": "number 0..1|null", "dissent_count": "number"},
                 "judge": {"verdict": "string", "final": "string", "agreement_summary": "string", "dissent_summary": "string"},
             },
         }
@@ -286,13 +318,18 @@ def setup_magi_routes(session_manager) -> APIRouter:
         if payload.session_id:
             _verify_session_owner(request, payload.session_id)
 
+        evidence, evidence_error = await _gather_evidence(owner, payload)
         result = await orchestrator.deliberate(
             payload.query,
             targets,
             mode=payload.mode,
             timeout_seconds=payload.timeout_seconds,
             judge_target=judge_target,
+            weighted=payload.weighted,
+            evidence=evidence,
         )
+        if evidence_error:
+            result["evidence_error"] = evidence_error
 
         if payload.session_id:
             _save_magi_turn(payload.session_id, payload.display_query, payload.query, result)
@@ -317,6 +354,16 @@ def setup_magi_routes(session_manager) -> APIRouter:
 
         async def run() -> None:
             try:
+                evidence = None
+                if payload.evidence:
+                    await queue.put({"type": "system", "phase": "evidence"})
+                    evidence, evidence_error = await _gather_evidence(owner, payload)
+                    await queue.put({
+                        "type": "system",
+                        "phase": "evidence_ready" if evidence else "evidence_failed",
+                        "evidence": {"url": evidence.get("url"), "title": evidence.get("title")} if evidence else None,
+                        "error": evidence_error,
+                    })
                 result = await orchestrator.deliberate(
                     payload.query,
                     targets,
@@ -324,6 +371,8 @@ def setup_magi_routes(session_manager) -> APIRouter:
                     timeout_seconds=payload.timeout_seconds,
                     judge_target=judge_target,
                     event_callback=on_event,
+                    weighted=payload.weighted,
+                    evidence=evidence,
                 )
                 if payload.session_id:
                     try:

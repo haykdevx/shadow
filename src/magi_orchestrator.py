@@ -98,6 +98,7 @@ class MagiOrchestrator:
         query: str,
         timeout_seconds: int,
         event_callback: EventCallback | None = None,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         started = time.time()
         base = self._base_result(role, target)
@@ -112,7 +113,7 @@ class MagiOrchestrator:
         try:
             parsed, repaired = await self._structured_call(
                 target,
-                build_role_messages(query, role),
+                build_role_messages(query, role, evidence),
                 parser=parse_magi_response,
                 prompt_type="magi",
                 timeout_seconds=timeout_seconds,
@@ -224,13 +225,23 @@ class MagiOrchestrator:
         timeout_seconds: int = 180,
         judge_target: dict[str, Any] | None = None,
         event_callback: EventCallback | None = None,
+        weighted: bool = False,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if mode not in {"vote", "debate", "judge"}:
             raise ValueError(f"Unsupported MAGI resolution mode: {mode}")
         active_targets = self._normalize_targets(targets)
+        diversity = self._model_diversity(active_targets)
+        if diversity["warning"]:
+            self.logger.info("MAGI diversity: %s", diversity["warning"])
+            await self._emit(event_callback, {
+                "type": "system",
+                "phase": "diversity_warning",
+                "detail": diversity["warning"],
+            })
 
         first_round = await asyncio.gather(*[
-            self.run_role(role, target, query, timeout_seconds, event_callback)
+            self.run_role(role, target, query, timeout_seconds, event_callback, evidence)
             for role, target in zip(MAGI_ROLES, active_targets)
         ])
         magi = first_round
@@ -242,7 +253,7 @@ class MagiOrchestrator:
                 for role, target in zip(MAGI_ROLES, active_targets)
             ])
 
-        vote = vote_resolution(magi)
+        vote = vote_resolution(magi, weighted=weighted)
         final = vote["final"]
         resolution = "debate_vote" if mode == "debate" else "vote"
         judge_error = None
@@ -280,7 +291,7 @@ class MagiOrchestrator:
                     f"Agreement: {judge_result['agreement_summary']}\n"
                     f"Dissent: {judge_result['dissent_summary']}"
                 )
-                resolution = "judge" if mode == "judge" else "judge_deadlock"
+                resolution = "judge" if mode == "judge" else "judge_escalated"
             except Exception as exc:  # noqa: BLE001
                 judge_error = str(exc)[:400]
                 resolution = "vote_fallback" if vote.get("winner") else "deadlock_unresolved"
@@ -297,11 +308,19 @@ class MagiOrchestrator:
             "vote": {
                 "winner": vote.get("winner"),
                 "counts": vote.get("counts") or {},
+                "weights": vote.get("weights") or {},
+                "weighted": bool(weighted),
                 "avg_confidence": vote.get("avg_confidence"),
                 "dissent": vote.get("dissent") or [],
                 "dissent_count": vote.get("dissent_count", 0),
                 "answered_count": vote.get("answered_count", 0),
             },
+            "evidence": {
+                "url": evidence.get("url"),
+                "title": evidence.get("title"),
+                "chars": len(str(evidence.get("text") or "")),
+            } if evidence else None,
+            "model_diversity": diversity,
             "judge": judge_result,
             "degraded": any(not item.get("ok") for item in magi) or bool(judge_error),
             "malfunction_count": sum(1 for item in magi if not item.get("ok")),
@@ -331,6 +350,28 @@ class MagiOrchestrator:
     @staticmethod
     def _elapsed_ms(started: float) -> int:
         return round((time.time() - started) * 1000)
+
+    @staticmethod
+    def _model_diversity(targets: list[dict[str, Any]]) -> dict[str, Any]:
+        """Report how many genuinely distinct models back the units.
+
+        Deliberation between copies of one model mostly re-samples the same
+        distribution, so shared blind spots survive the vote. We never block
+        on this (single-endpoint installs are legitimate) — we surface it.
+        """
+        unique = {(t.get("endpoint_id"), t.get("model")) for t in targets}
+        warning = None
+        if len(unique) < len(targets):
+            models = ", ".join(sorted({str(t.get("model")) for t in targets}))
+            warning = (
+                f"only {len(unique)} distinct model(s) across {len(targets)} units ({models}); "
+                "duplicated units share blind spots, weakening cross-validation"
+            )
+        return {
+            "unique_models": len(unique),
+            "total_units": len(targets),
+            "warning": warning,
+        }
 
     @staticmethod
     def _normalize_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:

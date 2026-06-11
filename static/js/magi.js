@@ -13,6 +13,8 @@ let API_BASE = '';
 const KEY_ENABLED = 'shadow-magi-enabled';
 const KEY_MODE = 'shadow-magi-resolution';
 const KEY_ROLES = 'shadow-magi-roles';
+const KEY_WEIGHTED = 'shadow-magi-weighted';
+const KEY_EVIDENCE = 'shadow-magi-evidence';
 
 const ROLE_ORDER = ['melchior', 'balthasar', 'casper'];
 const ROLE_LABELS = {
@@ -39,6 +41,14 @@ function isActive() {
 
 function getMode() {
   return localStorage.getItem(KEY_MODE) || 'vote';
+}
+
+function getWeighted() {
+  return localStorage.getItem(KEY_WEIGHTED) === '1';
+}
+
+function getEvidence() {
+  return localStorage.getItem(KEY_EVIDENCE) === '1';
 }
 
 function getRoleSelections() {
@@ -194,6 +204,14 @@ async function openPanel() {
         <option value="judge"${getMode() === 'judge' ? ' selected' : ''}>JUDGE</option>
       </select>
     </label>
+    <label class="magi-config-toggle">
+      <span><strong>Confidence-weighted vote</strong><em>Rank stances by summed unit confidence instead of head count.</em></span>
+      <label class="admin-switch"><input type="checkbox" id="magi-config-weighted"${getWeighted() ? ' checked' : ''}><span class="admin-slider"></span></label>
+    </label>
+    <label class="magi-config-toggle">
+      <span><strong>Evidence grounding</strong><em>Fetch one shared web source first; all units reason over the same text.</em></span>
+      <label class="admin-switch"><input type="checkbox" id="magi-config-evidence"${getEvidence() ? ' checked' : ''}><span class="admin-slider"></span></label>
+    </label>
     <div class="magi-config-grid">
       ${ROLE_ORDER.map(role => buildRoleSelect(role, config, options, saved)).join('')}
     </div>
@@ -207,6 +225,8 @@ async function openPanel() {
     btn.addEventListener('click', () => {
       const mode = body.querySelector('#magi-config-mode')?.value || 'vote';
       localStorage.setItem(KEY_MODE, mode);
+      localStorage.setItem(KEY_WEIGHTED, body.querySelector('#magi-config-weighted')?.checked ? '1' : '0');
+      localStorage.setItem(KEY_EVIDENCE, body.querySelector('#magi-config-evidence')?.checked ? '1' : '0');
       const nextRoles = {};
       body.querySelectorAll('[data-magi-role]').forEach(sel => {
         const role = sel.getAttribute('data-magi-role');
@@ -441,11 +461,20 @@ function handleEvent(nerv, event) {
   if (event.type === 'unit') {
     applyUnit(nerv, event.role, event.unit || event, event.phase);
   } else if (event.type === 'system') {
+    const labels = {
+      judge: 'JUDGE',
+      evidence: 'GATHERING EVIDENCE',
+      evidence_ready: 'EVIDENCE READY',
+      evidence_failed: 'EVIDENCE FAILED — PROCEEDING',
+      diversity_warning: 'LOW MODEL DIVERSITY',
+      peer_review: 'PEER REVIEW',
+    };
+    const text = labels[event.phase] || 'PEER REVIEW';
     const phase = nerv.querySelector('.magi-nerv-phase');
-    if (phase) phase.textContent = event.phase === 'judge' ? 'JUDGE' : 'PEER REVIEW';
+    if (phase) phase.textContent = text;
     const core = nerv.querySelector('.magi-core');
     if (core && core.dataset.state === 'deliberating') {
-      setText(core, '.magi-core-tag', event.phase === 'judge' ? 'SYNTHESIZING' : 'PEER REVIEW');
+      setText(core, '.magi-core-tag', event.phase === 'judge' ? 'SYNTHESIZING' : text);
     }
   } else if (event.type === 'resolved') {
     renderResolved(nerv, event.result || {});
@@ -473,6 +502,8 @@ async function runDeliberation({ query, displayQuery, sessionId }) {
         session_id: sessionId || '',
         mode: getMode(),
         roles: rolePayload(),
+        weighted: getWeighted(),
+        evidence: getEvidence(),
       }),
     });
     if (!res.ok || !res.body) throw new Error((await res.text().catch(() => '')) || `HTTP ${res.status}`);
