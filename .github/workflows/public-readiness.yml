@@ -25,3 +25,46 @@ jobs:
         run: |
           node --check static/app.js
           find static/js -name '*.js' -print0 | xargs -0 -n1 node --check
+
+
+  windows-companion:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Windows companion scripts
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in @(
+            "scripts/install-shadow-device.ps1",
+            "companion/shadow-device.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            foreach ($error in $errors) {
+              Write-Error "${file}:$($error.Extent.StartLineNumber): $($error.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Verify dependency-free installer contract
+        shell: powershell
+        run: |
+          $installer = Get-Content scripts/install-shadow-device.ps1 -Raw
+          if ($installer -match 'relay_agent\.py|Get-Command\s+(python|py)|pip\s+install') {
+            throw "Windows installer reintroduced an external Python dependency"
+          }
+          if ($installer -notmatch 'shadow-device\.ps1') {
+            throw "Windows installer does not install the native companion"
+          }
+          if ($installer -match '(?m)^\s*(New-ScheduledTaskAction|Register-ScheduledTask)\b') {
+            throw "Windows installer must use no-admin per-user startup, not Task Scheduler"
+          }
+          if ($installer -notmatch 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run') {
+            throw "Windows installer is missing current-user startup registration"
+          }

@@ -43,6 +43,42 @@ Shadow HTTPS origin. It does not open a home-router port. Device lists, jobs,
 approvals, audit events, and Telegram commands are scoped to the Shadow account
 that created the enrollment code.
 
+### Windows
+
+The Windows command uses only Windows PowerShell 5.1 and the .NET Framework
+included with Windows 10/11. It does not install or require Python, pip, Node,
+Git, Chocolatey, winget, or administrator privileges. The installer:
+
+1. downloads the native PowerShell relay into
+   `%LOCALAPPDATA%\Shadow\device-agent`;
+2. enrolls with the single-use setup code;
+3. protects the device token with Windows DPAPI for the current user;
+4. registers a per-user `HKCU\...\Run` startup entry, with a Startup-folder
+   fallback when registry policy blocks it; and
+5. starts the relay hidden in the signed-in desktop session.
+
+The native relay includes the same Codex-style workspace contract as Linux
+and macOS: scoped tree/read/search, edits and patching, commands, Git actions,
+pre-edit checkpoints, and rollback. The server still decides Ask/Auto/Full;
+the Windows relay independently re-checks every path against both the selected
+workspace and the current user's `SHADOW_ALLOWED_ROOTS` boundary.
+
+Run the command again with a fresh setup code to repair or update an
+installation. To uninstall without deleting the enrollment credential:
+
+```powershell
+$i=irm 'https://YOUR-SHADOW/api/shadow/device/install/windows'; & ([scriptblock]::Create($i)) -Uninstall
+```
+
+Add `-Purge` to remove the local device credential too.
+
+If enrollment succeeded but startup registration was interrupted, repair the
+existing installation without creating another device or setup code:
+
+```powershell
+$i=irm 'https://YOUR-SHADOW/api/shadow/device/install/windows'; & ([scriptblock]::Create($i)) -Repair
+```
+
 The old `SHADOW_HOME_AGENT_URL` bridge remains only as a migration adapter. It
 is visible exclusively to `SHADOW_PC_OWNER`; new accounts never request access
 to it and should use Command enrollment.

@@ -90,7 +90,46 @@ sudo systemctl restart caddy
 Caddy terminates HTTPS and proxies to `127.0.0.1:7000`. Never open port `7000`
 in UFW. Keep signup disabled, use a strong admin password, and enable TOTP 2FA.
 
-## 4. Linked Home PC
+## 4. Interactive Remote Desktop
+
+Shadow embeds a restricted MeshCentral console at `/remote/`. It is optional and
+runs in an isolated Docker profile. Generate two independent secrets and add them
+to `.env`:
+
+```bash
+openssl rand -base64 48
+openssl rand -base64 48
+```
+
+```dotenv
+SHADOW_MESH_ENABLED=true
+SHADOW_MESH_GATEWAY_URL=http://meshcentral-gateway:8099
+SHADOW_MESH_GATEWAY_KEY=FIRST_RANDOM_VALUE
+SHADOW_MESH_ADMIN_USER=shadow_mesh_admin
+SHADOW_MESH_ADMIN_PASSWORD=SECOND_RANDOM_VALUE
+SHADOW_MESH_PUBLIC_HOST=shadow.example.com
+SHADOW_MESH_PUBLIC_ORIGIN=https://shadow.example.com
+SHADOW_MESH_PUBLIC_PATH=/remote/
+SHADOW_MESH_BIND=127.0.0.1
+SHADOW_MESH_PORT=8443
+```
+
+Start the profile and reload Caddy after installing the updated example:
+
+```bash
+docker compose --profile remote up -d
+sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Port `8443` remains bound to loopback. Do not open it in UFW. Open **Command →
+Remote Desktop**, select **Enable Remote Desktop**, and run the generated agent
+installer on the target PC. Shadow creates a separate restricted MeshCentral user
+and device group for each Shadow account. Browser launches use three-minute login
+tokens; remote accounts have desktop-control rights but no MeshCentral terminal or
+file-manager rights. Shadow's own terminal and files remain confirmation-gated.
+
+## 5. Linked Home PC
 
 Install Tailscale on your Linux PC and bind the companion to that PC's exact
 Tailscale IP. Do not use a wildcard bind.
@@ -157,7 +196,7 @@ Lock, typing, keypresses, clipboard writes, media, volume, and application
 control wait for explicit approval. App launching is label-based and restricted
 by `SHADOW_ALLOWED_APPS` on the home PC.
 
-## 5. Telegram Client (MTProto — real user account)
+## 6. Telegram Client (MTProto — real user account)
 
 Shadow can act as a full Telegram client (like Telegram Desktop) using
 [Telethon](https://github.com/LonamiWebs/Telethon) over the MTProto protocol.
@@ -214,7 +253,7 @@ Log out from the UI to remove the session file.
   receive real-time updates (new messages, edits, read receipts). The UI
   polls `/api/telegram/updates` to drain these events.
 
-## 5. Optional Telegram Remote
+## 7. Optional Telegram Remote
 
 Create a bot with BotFather. The bridge is PC-control only and does not need a Shadow chat API token.
 Add the token to VPS `.env`; the numeric allowlist is optional defense-in-depth:
@@ -241,7 +280,7 @@ Pair an account from **Command > Device Access**:
 Unauthorized Telegram accounts receive only `Not authorized user.` Pending actions,
 approvals, and audit events are isolated to the paired Shadow account.
 
-## 6. Backups And Operations
+## 8. Backups And Operations
 
 Persist and back up `data/`, the Docker named volumes, and `.env` separately.
 Treat every backup as secret material.

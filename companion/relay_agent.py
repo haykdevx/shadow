@@ -19,18 +19,22 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+AGENT_VERSION = "2.1.0"
+
 try:
     from companion.home_agent import ALL_ACTIONS, HomeAgentError, execute_action
 except ImportError:  # Standalone installer places both files together.
     from home_agent import ALL_ACTIONS, HomeAgentError, execute_action
 
-try:  # Workspace actions are optional: older installs simply lack them.
+WORKSPACE_IMPORT_ERROR = ""
+try:
     from companion.workspace_agent import WS_ALL_ACTIONS
-except ImportError:
+except ImportError as first_error:
     try:
         from workspace_agent import WS_ALL_ACTIONS
-    except ImportError:
+    except ImportError as second_error:
         WS_ALL_ACTIONS = frozenset()
+        WORKSPACE_IMPORT_ERROR = f"{first_error}; {second_error}"
 
 
 def _config_path() -> Path:
@@ -72,6 +76,7 @@ def _metadata(name: str = "") -> dict[str, Any]:
         "name": name.strip() or socket.gethostname() or "Shadow device",
         "hostname": socket.gethostname(),
         "platform": platform.platform(),
+        "agent_version": AGENT_VERSION,
         "capabilities": sorted(ALL_ACTIONS | WS_ALL_ACTIONS),
     }
 
@@ -148,7 +153,18 @@ def main() -> None:
     parser.add_argument("--enroll", metavar="CODE", help="Single-use enrollment code from Command")
     parser.add_argument("--name", default="", help="Device name shown in Command")
     parser.add_argument("--once", action="store_true", help="Enroll and exit")
+    parser.add_argument("--check", action="store_true", help="Verify local agent modules and exit")
     args = parser.parse_args()
+
+    if args.check:
+        if WORKSPACE_IMPORT_ERROR or not WS_ALL_ACTIONS:
+            raise SystemExit(f"Workspace agent unavailable: {WORKSPACE_IMPORT_ERROR or 'no capabilities'}")
+        print(json.dumps({
+            "ok": True,
+            "agent_version": AGENT_VERSION,
+            "workspace_actions": sorted(WS_ALL_ACTIONS),
+        }))
+        return
 
     config = enroll(args.server, args.enroll, args.name) if args.enroll else load_config()
     if args.once:

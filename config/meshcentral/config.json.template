@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json",
+  "settings": {
+    "cert": "localhost",
+    "dataPath": "/opt/meshcentral/meshcentral-data",
+    "port": 443,
+    "aliasPort": 443,
+    "redirPort": 0,
+    "WANonly": true,
+    "trustedProxy": true,
+    "agentPong": 60,
+    "selfUpdate": false,
+    "allowFraming": false,
+    "WebRTC": true,
+    "sessionKey": "replace-at-bootstrap"
+  },
+  "domains": {
+    "remote": {
+      "title": "Shadow Remote",
+      "title2": "Private Remote Desktop",
+      "newAccounts": false,
+      "minify": true,
+      "myServer": false,
+      "userNameIsEmail": false,
+      "localSessionRecording": false,
+      "allowedFramingOrigins": [
+        "http://localhost:7000"
+      ],
+      "passwordRequirements": {
+        "loginTokens": true
+      }
+    }
+  }
+}

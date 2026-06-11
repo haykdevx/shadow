@@ -390,6 +390,19 @@ def _brand_process() -> None:
 
 
 def run_gui(base: list[str]) -> int:
+    # Preferred: the Qt/QtWebEngine (Chromium) shell, which hosts the app AND an
+    # embedded in-window browser as tabs. Fall back to the pywebview shell only
+    # if QtWebEngine isn't available.
+    try:
+        import shell  # noqa: F401  (desktop/ is on sys.path when run as a script)
+    except Exception as exc:  # noqa: BLE001
+        log(f"Qt shell unavailable ({exc}); falling back to pywebview")
+    else:
+        return shell.run(base)
+    return _run_gui_pywebview(base)
+
+
+def _run_gui_pywebview(base: list[str]) -> int:
     try:
         import webview  # imported lazily so --check / --headless need no GUI deps
     except ImportError:
