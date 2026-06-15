@@ -42,6 +42,13 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
 
+<p align="center">
+  <img src="docs/computer-access.png" alt="Computer access — authorize a folder on your own PC and run agent sessions under a permission mode" width="48%">
+  &nbsp;
+  <img src="docs/computer-access-audit.png" alt="Computer Access Audit Log in Settings → System — every file, command, and agent action, owner-scoped" width="48%">
+</p>
+<p align="center"><sub><b>Computer access:</b> authorize a folder and run agent sessions on your own machine (left) · every action lands in an append-only audit log in Settings → System (right).</sub></p>
+
 ---
 
 ## Architecture
