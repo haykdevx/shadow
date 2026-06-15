@@ -13265,6 +13265,43 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   transform: translateX(14px);
 }
 
+/* Computer-access audit log */
+.admin-audit-row {
+  display: flex;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+.admin-audit-time {
+  flex: 0 0 auto;
+  opacity: 0.5;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.admin-audit-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.admin-audit-event {
+  font-weight: 600;
+}
+.admin-audit-owner {
+  margin-left: 8px;
+  opacity: 0.55;
+  font-size: 11px;
+}
+.admin-audit-summary {
+  opacity: 0.7;
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* User rows */
 .admin-user-row {
   display: flex;

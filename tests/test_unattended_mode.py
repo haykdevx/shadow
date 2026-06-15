@@ -8,9 +8,9 @@ destructive git, Shadow's own credentials) stays a hard DENY.
 
 import pytest
 
-import src.mission_policy as policy
-import src.mission_workspaces as workspaces
-from src.mission_policy import (
+import src.workspace_policy as policy
+import src.workspace_service as workspaces
+from src.workspace_policy import (
     ALLOW,
     DENY,
     REQUIRE_APPROVAL,
@@ -18,7 +18,7 @@ from src.mission_policy import (
     GrantStore,
     evaluate,
 )
-from src.mission_workspaces import WorkspaceDenied, WorkspaceError
+from src.workspace_service import WorkspaceDenied, WorkspaceError
 
 
 @pytest.fixture(autouse=True)

@@ -118,30 +118,31 @@ Verified integration points this subsystem builds on (do not duplicate them):
   the allowlist in `routes/shadow_routes.py::shadow_device_source`.
 - **Model providers**: `ModelEndpoint` DB rows; per-user visibility via the
   pattern in `routes/magi_routes.py::_visible_endpoints`; calls go through
-  `src/llm_core.llm_call_async(url, model, messages, headers=...)`. Mission
-  roles map to `{endpoint_id, model}` pairs — no provider is hardcoded.
-- **Approvals**: missions use durable JSON approvals (mission state must
-  survive restarts), but keep the established contract from
+  `src/llm_core.llm_call_async(url, model, messages, headers=...)`. Sessions
+  map to `{endpoint_id, model}` pairs — no provider is hardcoded.
+- **Approvals**: workspace-agent approvals keep the established contract from
   `src/shadow_pc.py`/`src/browser_manager.py`: approval endpoints require an
   interactive cookie (`_real_user`); agent identities and API tokens can
-  never self-approve.
-- **Policy engine**: `src/mission_policy.py` is the single decision point
+  never self-approve. Computer access is additionally gated per account by
+  the `can_use_computer` privilege (`routes/workspace_agent_routes.py`).
+- **Policy engine**: `src/workspace_policy.py` is the single decision point
   (`ALLOW` / `REQUIRE_APPROVAL` / `DENY`) for every workspace tool call, on
   top of declared `ActionRequest` capabilities. Models never decide their
   own permissions; the engine is pure and unit-tested. The device agent
   independently re-checks roots.
-- **Durable state**: missions, workspaces, policy rules, and the audit log
-  live under `data/missions/` using the `core/atomic_io` JSON pattern (same
+- **Durable state**: workspaces, policy rules, and the audit log live under
+  `data/workspace-agent/` using the `core/atomic_io` JSON pattern (same
   family as `data/shadow-devices.json`); no SQL schema changes.
 - **Agent sessions**: `src/agent_sessions.py` is the direct (no-DAG)
-  conversational tool loop for simple tasks; it reuses the exact
-  `mission_workspaces.dispatch` → policy → relay path, the mission
-  checkpoint contract, and the `endpoint_resolver`/`llm_core` model path.
-  The `unattended` workspace mode lives in `mission_policy.evaluate`
+  conversational tool loop; it reuses the exact
+  `workspace_service.dispatch` → `workspace_policy.evaluate` → relay path,
+  the checkpoint contract, and the `endpoint_resolver`/`llm_core` model path.
+  The `unattended` workspace mode lives in `workspace_policy.evaluate`
   (ALLOW/DENY only — REQUIRE_APPROVAL is unreachable in that mode).
-- **Frontend**: `static/js/missionsPage.js` follows the `commandPage.js`
-  full-page module pattern (`openPage`/`closePage`, route in `app.py` +
-  `static/app.js` `_routeOpen`, sidebar button in `static/index.html`).
+- **Frontend**: `static/js/computerMode.js` (with `workspaceAgentShared.js`)
+  follows the full-page module pattern (`openPage`/`closePage`, route in
+  `app.py` + `static/app.js` `_routeOpen`, sidebar button in
+  `static/index.html`); it injects `static/workspace-agent.css` at runtime.
 - Chat, MAGI, Command, Telegram, devices, and the agent browser are not
   modified by this subsystem beyond the wiring listed above.
 

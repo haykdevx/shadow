@@ -1,6 +1,6 @@
-"""Central permission policy for Autonomous Missions and the Desktop Workspace.
+"""Central permission policy for Desktop workspace agent.
 
-Every workspace/mission tool call is described as an :class:`ActionRequest`
+Every workspace tool call is described as an :class:`ActionRequest`
 and submitted to :func:`evaluate`, which returns ``ALLOW``,
 ``REQUIRE_APPROVAL`` or ``DENY``. Models never decide their own permissions:
 the engine is pure (no I/O in the decision path), deterministic, and
@@ -16,7 +16,7 @@ Permission modes (Codex-style):
   project commands (tests, builds, formatters, git inspection) run freely;
   actions detected as potentially unsafe (destructive filesystem operations,
   privilege escalation, power control, force pushes, secrets paths, network
-  access not yet approved for the mission, installers, security settings)
+  access not yet approved for the session, installers, security settings)
   still require approval.
 - ``full`` — explicitly armed access. Requires password reauthentication,
   shows a persistent indicator, supports an optional expiry, and writes an
@@ -34,7 +34,7 @@ Permission modes (Codex-style):
   to. The mode is stored on the workspace record, so it survives restarts.
 
 Approval grants are scoped: ``once`` (consumed by the next matching action),
-``mission``, ``session``, or ``workspace`` (a persistent, revocable rule).
+``session`` or ``workspace`` (a persistent, revocable rule).
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ import secrets
 import threading
 import time
 import unicodedata
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ DENY = "DENY"
 MODES = ("ask", "auto", "full", "unattended")
 DEFAULT_MODE = "auto"
 
-GRANT_SCOPES = ("once", "mission", "session", "workspace")
+GRANT_SCOPES = ("once", "session", "workspace")
 
 # Capabilities a tool call may declare. Keep this list closed: unknown
 # capabilities are treated as the most dangerous thing they could be.
@@ -81,7 +82,7 @@ CAPABILITIES = (
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
-POLICY_DIR = Path(os.getenv("SHADOW_MISSIONS_DATA", "data/missions"))
+POLICY_DIR = Path(os.getenv("SHADOW_AGENT_DATA", "data/workspace-agent"))
 RULES_PATH = POLICY_DIR / "policy-rules.json"
 FULL_ACCESS_PATH = POLICY_DIR / "full-access.json"
 AUDIT_PATH = POLICY_DIR / "audit.log"
@@ -92,7 +93,7 @@ FULL_ACCESS_MAX_SECONDS = 8 * 3600
 FULL_ACCESS_DEFAULT_SECONDS = 3600
 
 
-class MissionPolicyError(RuntimeError):
+class WorkspacePolicyError(RuntimeError):
     """A clean policy/configuration failure."""
 
 
@@ -118,7 +119,6 @@ class ActionRequest:
     outside_roots: bool = False
     command: str = ""                 # raw command line for shell actions
     path: str = ""                    # primary target path, if any
-    mission_id: str = ""
     detail: dict[str, Any] = field(default_factory=dict)
 
 
@@ -149,13 +149,13 @@ def canonicalize_path(raw: str) -> str:
     """
     value = str(raw or "")
     if "\x00" in value or "%00" in value:
-        raise MissionPolicyError("Path contains a null byte")
+        raise WorkspacePolicyError("Path contains a null byte")
     value = unicodedata.normalize("NFC", value)
     # Collapse percent-encoded traversal attempts before normalization.
     lowered = value.lower()
     for encoded in ("%2e", "%2f", "%5c"):
         if encoded in lowered:
-            raise MissionPolicyError("Percent-encoded path characters are not allowed")
+            raise WorkspacePolicyError("Percent-encoded path characters are not allowed")
     value = value.replace("\\", "/")
     # posixpath.normpath resolves '.' and '..' textually.
     normalized = posixpath.normpath(value)
@@ -172,7 +172,7 @@ def path_within_root(path: str, root: str) -> bool:
     try:
         c_path = canonicalize_path(path)
         c_root = canonicalize_path(root)
-    except MissionPolicyError:
+    except WorkspacePolicyError:
         return False
     if c_root in ("", ".", "/"):
         return False
@@ -190,7 +190,7 @@ def is_relative_escape(raw: str) -> bool:
     """True when a *relative* path tries to climb out (``..`` after norm)."""
     try:
         normalized = canonicalize_path(raw)
-    except MissionPolicyError:
+    except WorkspacePolicyError:
         return True
     return normalized == ".." or normalized.startswith("../")
 
@@ -351,7 +351,7 @@ def classify_path(path: str) -> tuple[str, str] | None:
     """Return (rule, reason) when a path touches secrets/system locations."""
     try:
         normalized = canonicalize_path(path).lower()
-    except MissionPolicyError:
+    except WorkspacePolicyError:
         return ("invalid-path", "path could not be canonicalized")
     return _scan(_SECRET_PATHS, normalized)
 
@@ -375,13 +375,13 @@ def grant_key_for(request: ActionRequest) -> str:
     if request.path:
         try:
             return f"{request.capability}:{canonicalize_path(request.path).lower()[:160]}"
-        except MissionPolicyError:
+        except WorkspacePolicyError:
             return f"{request.capability}:invalid"
     return f"{request.capability}:*"
 
 
 class GrantStore:
-    """Scoped approval grants. Session/mission/once grants are in memory by
+    """Scoped approval grants. Session/once grants are in memory by
     design (a restart drops them — fail closed); workspace rules persist."""
 
     def __init__(self) -> None:
@@ -394,32 +394,34 @@ class GrantStore:
     def grant(self, owner: str, scope: str, scope_id: str, grant_key: str,
               *, workspace_id: str = "", summary: str = "", ttl: float = 12 * 3600) -> dict[str, Any]:
         if scope not in GRANT_SCOPES:
-            raise MissionPolicyError(f"Unknown grant scope: {scope}")
+            raise WorkspacePolicyError(f"Unknown grant scope: {scope}")
         owner = str(owner or "").strip().lower()
         if not owner:
-            raise MissionPolicyError("Grants require a real account owner")
+            raise WorkspacePolicyError("Grants require a real account owner")
         if scope == "workspace":
             if not workspace_id:
-                raise MissionPolicyError("Workspace grants need a workspace id")
+                raise WorkspacePolicyError("Workspace grants need a workspace id")
             return _add_persistent_rule(owner, workspace_id, grant_key, summary)
+        # A "once" grant is consumed by the *next* matching action regardless
+        # of which session dispatches it, so it is keyed per-owner only — the
+        # caller's scope_id is ignored. "session" grants stay session-scoped.
+        key_scope_id = "" if scope == "once" else scope_id
         with _LOCK:
-            bucket = self._volatile.setdefault(self._scope_key(owner, scope, scope_id), {})
-            bucket[grant_key] = time.time() + (0 if scope == "once" else ttl)
-            if scope == "once":
-                bucket[grant_key] = time.time() + 600  # once-grants stay claimable for 10 min
+            bucket = self._volatile.setdefault(self._scope_key(owner, scope, key_scope_id), {})
+            # once-grants stay claimable for 10 min; session-grants use the ttl.
+            bucket[grant_key] = time.time() + (600 if scope == "once" else ttl)
         return {"scope": scope, "grant_key": grant_key}
 
     def consume(self, owner: str, request: ActionRequest, *,
-                mission_id: str = "", session_id: str = "") -> bool:
+                session_id: str = "") -> bool:
         """True when a grant covers this action. Once-grants are consumed."""
         key = grant_key_for(request)
         owner = str(owner or "").strip().lower()
         now = time.time()
         with _LOCK:
-            for scope, scope_id in (("once", mission_id or session_id),
-                                    ("mission", mission_id),
-                                    ("session", session_id)):
-                if not scope_id:
+            # "once" is owner-global (scope_id ""); "session" needs a session id.
+            for scope, scope_id in (("once", ""), ("session", session_id)):
+                if scope != "once" and not scope_id:
                     continue
                 bucket = self._volatile.get(self._scope_key(owner, scope, scope_id)) or {}
                 expiry = bucket.get(key)
@@ -541,12 +543,12 @@ def arm_full_access(owner: str, device_id: str, *, password: str,
     """
     owner = str(owner or "").strip().lower()
     if not owner or not device_id:
-        raise MissionPolicyError("Full access needs an owner and a device")
+        raise WorkspacePolicyError("Full access needs an owner and a device")
     from core.auth import AuthManager  # late import to keep the engine pure for tests
 
     if not AuthManager().verify_password(owner, str(password or "")):
         audit(owner, "full_access_denied", {"device_id": device_id, "reason": "bad password"})
-        raise MissionPolicyError("Password verification failed")
+        raise WorkspacePolicyError("Password verification failed")
     duration = int(duration_seconds or FULL_ACCESS_DEFAULT_SECONDS)
     duration = max(60, min(duration, FULL_ACCESS_MAX_SECONDS))
     expires = time.time() + duration
@@ -602,6 +604,44 @@ def audit(owner: str, event: str, detail: dict[str, Any] | None = None) -> None:
         pass
 
 
+def read_audit_log(*, owner: str | None = None, event: str = "",
+                   before: float | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Return up to ``limit`` audit records, most recent first.
+
+    ``owner`` restricts to one account's records (``None`` = every account,
+    for admins). ``before`` paginates by timestamp (exclusive). Only the tail
+    of the file is scanned so a long-lived log stays cheap to page through.
+    """
+    limit = max(1, min(int(limit), 500))
+    try:
+        with AUDIT_PATH.open("r", encoding="utf-8") as handle:
+            lines = deque(handle, maxlen=20000)
+    except OSError:
+        return []
+    results: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if owner and record.get("owner") != owner:
+            continue
+        if event and record.get("event") != event:
+            continue
+        ts = record.get("ts")
+        if before is not None and isinstance(ts, (int, float)) and ts >= before:
+            continue
+        results.append(record)
+        if len(results) >= limit:
+            break
+    return results
+
+
 # ── the decision function ───────────────────────────────────────────────
 
 _READ_CAPS = {"fs_read", "git_read"}
@@ -651,9 +691,8 @@ def evaluate(
     request: ActionRequest,
     *,
     mode: str = DEFAULT_MODE,
-    mission_id: str = "",
     session_id: str = "",
-    mission_network_approved: bool = False,
+    network_approved: bool = False,
 ) -> Decision:
     """Decide ALLOW / REQUIRE_APPROVAL / DENY for one declared action."""
     if mode not in MODES:
@@ -692,7 +731,7 @@ def evaluate(
 
     def needs_approval(reason: str, rule: str) -> Decision:
         if GRANTS.consume(request.owner, request,
-                          mission_id=mission_id, session_id=session_id):
+                          session_id=session_id):
             return Decision(ALLOW, f"approved by grant ({reason})", rule=f"grant:{rule}", grant_key=grant_key)
         return Decision(REQUIRE_APPROVAL, reason, rule=rule, grant_key=grant_key)
 
@@ -750,7 +789,7 @@ def evaluate(
         return needs_approval(f"Process control: {flag_text}", "auto-process")
     if capability == "install":
         return needs_approval(f"Dependency installation: {flag_text or 'installer'}", "auto-install")
-    if network and not mission_network_approved:
+    if network and not network_approved:
         return needs_approval(f"Network access: {flag_text or 'internet access'}", "auto-network")
     if capability == "fs_delete":
         # Plain in-workspace delete (soft, recoverable) is routine in auto mode.

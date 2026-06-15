@@ -2,7 +2,7 @@
 
 A workspace is one explicitly authorized folder on one enrolled device,
 owned by one Shadow account. Every file/git/command action targeting it is
-declared as a :class:`src.mission_policy.ActionRequest`, decided by the
+declared as a :class:`src.workspace_policy.ActionRequest`, decided by the
 policy engine, and only then dispatched through the existing outbound device
 relay (`src.shadow_devices.dispatch_action`). The device agent re-enforces
 root containment independently, so the server is never the only guard.
@@ -20,20 +20,20 @@ from typing import Any
 
 from core.atomic_io import atomic_write_json
 from src import shadow_devices
-from src.mission_policy import (
+from src.workspace_policy import (
     ALLOW,
     DENY,
     MODES,
     ActionRequest,
     Decision,
-    MissionPolicyError,
+    WorkspacePolicyError,
     audit,
     canonicalize_path,
     evaluate,
     classify_command,
 )
 
-DATA_DIR = Path(os.getenv("SHADOW_MISSIONS_DATA", "data/missions"))
+DATA_DIR = Path(os.getenv("SHADOW_AGENT_DATA", "data/workspace-agent"))
 WORKSPACES_PATH = DATA_DIR / "workspaces.json"
 _LOCK = threading.RLock()
 
@@ -214,7 +214,7 @@ def _paths_in_args(action: str, args: dict[str, Any]) -> list[str]:
 
 
 def build_request(owner: str, workspace: dict[str, Any], action: str,
-                  args: dict[str, Any], *, mission_id: str = "") -> ActionRequest:
+                  args: dict[str, Any], *, session_id: str = "") -> ActionRequest:
     """Declare an ActionRequest for a workspace action (server-side check).
 
     ``outside_roots`` is a *syntactic* verdict here; the device agent
@@ -229,7 +229,7 @@ def build_request(owner: str, workspace: dict[str, Any], action: str,
     for raw in _paths_in_args(action, args):
         try:
             canonical = canonicalize_path(raw)
-        except MissionPolicyError:
+        except WorkspacePolicyError:
             outside = True
             continue
         if not primary_path:
@@ -237,7 +237,7 @@ def build_request(owner: str, workspace: dict[str, Any], action: str,
         # Absolute paths must stay inside the workspace root; relative paths
         # must not climb out (the agent resolves them against the root).
         if canonical.startswith("/") or canonical[1:3] in (":/", ":\\"):
-            from src.mission_policy import path_within_root
+            from src.workspace_policy import path_within_root
             if not path_within_root(canonical, root):
                 outside = True
         elif canonical == ".." or canonical.startswith("../"):
@@ -256,7 +256,6 @@ def build_request(owner: str, workspace: dict[str, Any], action: str,
         outside_roots=outside,
         command=command,
         path=primary_path,
-        mission_id=mission_id,
         detail={"workspace_root": root},
     )
 
@@ -268,9 +267,8 @@ def dispatch(
     args: dict[str, Any] | None = None,
     *,
     mode: str | None = None,
-    mission_id: str = "",
     session_id: str = "",
-    mission_network_approved: bool = False,
+    network_approved: bool = False,
     timeout: float | None = None,
 ) -> dict[str, Any]:
     """Policy-check then relay one workspace action to the device agent.
@@ -280,13 +278,12 @@ def dispatch(
     """
     workspace = get_workspace(owner, workspace_id)
     args = dict(args or {})
-    request = build_request(owner, workspace, action, args, mission_id=mission_id)
+    request = build_request(owner, workspace, action, args, session_id=session_id)
     decision = evaluate(
         request,
         mode=mode or str(workspace.get("mode") or "auto"),
-        mission_id=mission_id,
         session_id=session_id,
-        mission_network_approved=mission_network_approved,
+        network_approved=network_approved,
     )
     if decision.verdict == DENY:
         audit(owner, "action_denied", {"workspace_id": workspace["id"], "action": action,
@@ -309,6 +306,6 @@ def dispatch(
     audit(owner, "action_executed", {
         "workspace_id": workspace["id"], "action": action,
         "summary": request.summary[:200], "rule": decision.rule,
-        "mission_id": mission_id or None,
+        "session_id": session_id or None,
     })
     return result

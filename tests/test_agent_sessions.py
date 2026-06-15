@@ -8,10 +8,10 @@ import json
 import pytest
 
 import src.agent_sessions as sessions
-import src.mission_policy as policy
-import src.mission_workspaces as workspaces
+import src.workspace_policy as policy
+import src.workspace_service as workspaces
 from src.agent_sessions import AgentSessionError, ProviderError
-from src.mission_policy import GrantStore
+from src.workspace_policy import GrantStore
 
 
 @pytest.fixture(autouse=True)
