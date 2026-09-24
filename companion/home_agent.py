@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import ctypes
+import ctypes.util
 import hmac
 import json
 import mimetypes
@@ -25,6 +27,7 @@ except ImportError:  # Optional; Linux keeps its /proc fallback.
     psutil = None
 
 _SYS = platform.system()
+_cg_lib = None  # lazily-loaded CoreGraphics handle, macOS pointer control only
 
 READ_ACTIONS = frozenset({
     "status",
@@ -75,6 +78,12 @@ def _run(argv: list[str], *, input_text: str | None = None, timeout: float = 8) 
         raise HomeAgentError(f"{argv[0]} is not installed") from exc
     except subprocess.TimeoutExpired as exc:
         raise HomeAgentError(f"{argv[0]} timed out") from exc
+    except OSError as exc:
+        hint = {
+            "Darwin": "Check executable permissions and Privacy & Security permissions for Shadow (Accessibility / Screen Recording).",
+            "Windows": "Check application permissions and that Shadow runs in your signed-in desktop session.",
+        }.get(platform.system(), "Check executable permissions and access to your graphical desktop session (DISPLAY / WAYLAND_DISPLAY).")
+        raise HomeAgentError(f"{argv[0]} could not start: {exc}. {hint}") from exc
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
         raise HomeAgentError(f"{argv[0]} failed: {detail[:400]}")
@@ -250,7 +259,10 @@ def _status() -> dict[str, Any]:
             uptime = 0
     try:
         load = list(os.getloadavg())
-    except OSError:
+    except (OSError, AttributeError):
+        # os.getloadavg() doesn't exist at all on Windows (AttributeError,
+        # not the OSError some platforms raise when the value is
+        # unavailable) — status() must not crash there.
         load = []
     return {
         "ok": True,
@@ -281,7 +293,14 @@ def _processes(args: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "processes": ["PID COMMAND %CPU %MEM", *[row[1] for row in rows[:limit]]]}
     if platform.system() == "Windows":
         raise HomeAgentError("Install psutil for process monitoring on Windows")
-    output = _run(["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"], timeout=5)
+    if platform.system() == "Darwin":
+        # BSD ps (macOS) has no --sort flag, and -e means "show environment"
+        # rather than "select every process" as it does on Linux — the GNU
+        # invocation below silently does the wrong thing here, not just an
+        # unrecognized flag. -A selects all processes; -r sorts by %cpu desc.
+        output = _run(["ps", "-Ao", "pid,comm,%cpu,%mem", "-r"], timeout=5)
+    else:
+        output = _run(["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"], timeout=5)
     return {"ok": True, "processes": output.splitlines()[: limit + 1]}
 
 
@@ -546,9 +565,28 @@ def _kill_process(args: dict[str, Any]) -> dict[str, Any]:
         proc = psutil.Process(pid)
         proc.kill() if sig_name == "KILL" else proc.terminate()
         return {"ok": True, "pid": pid, "signal": sig_name}
-    sig = signal.SIGKILL if sig_name == "KILL" else signal.SIGTERM
+    # signal.SIGKILL doesn't exist on Windows at all (AttributeError, not a
+    # graceful fallback) — this path is only reachable without psutil, but
+    # it shouldn't crash the agent when it is. SIGTERM is already the
+    # forceful kill there: CPython special-cases it on Windows to call
+    # TerminateProcess() rather than delivering a real signal.
+    if sig_name == "KILL" and hasattr(signal, "SIGKILL"):
+        sig = signal.SIGKILL
+    else:
+        sig = signal.SIGTERM
     os.kill(pid, sig)
     return {"ok": True, "pid": pid, "signal": sig.name}
+
+
+def _int_arg(args: dict[str, Any], key: str, default: int | None = None) -> int:
+    """Read an int argument, failing as a HomeAgentError rather than a 500."""
+    raw = args.get(key, default)
+    if raw is None:
+        raise HomeAgentError(f"{key} is required")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise HomeAgentError(f"{key} must be a number, got {raw!r}") from None
 
 
 def _mouse_coordinates(args: dict[str, Any]) -> tuple[int, int]:
@@ -602,6 +640,15 @@ _WIN_KEYS = {
 }
 _WIN_MODIFIERS = {"ctrl": "^", "control": "^", "alt": "%", "opt": "%", "option": "%",
                   "shift": "+", "cmd": "^", "command": "^", "super": "^", "win": "^"}
+
+
+def _osa_str(value: str) -> str:
+    """Escape a value for interpolation into a double-quoted AppleScript string.
+
+    Window and application titles are attacker-controllable text; without this
+    a title containing a quote breaks out of the string and runs as script.
+    """
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _split_combo(combo: str) -> tuple[list[str], str]:
@@ -688,12 +735,100 @@ def _keypress(combo: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+class _CGPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+
+_CG_EVENT_MOUSE_MOVED = 5
+_CG_EVENT_LEFT_DOWN, _CG_EVENT_LEFT_UP = 1, 2
+_CG_EVENT_RIGHT_DOWN, _CG_EVENT_RIGHT_UP = 3, 4
+_CG_EVENT_OTHER_DOWN, _CG_EVENT_OTHER_UP = 25, 26
+_CG_HID_EVENT_TAP = 0
+_CG_MOUSE_BUTTON = {1: 0, 2: 1, 3: 2}  # left, right, center
+
+
+def _core_graphics():
+    """Load ApplicationServices (CoreGraphics) once, for zero-dependency
+    macOS pointer control — no external `cliclick` binary required. Still
+    needs Accessibility permission for the controlling process, same as
+    cliclick would; this only removes the extra `brew install` step."""
+    global _cg_lib
+    if _cg_lib is not None:
+        return _cg_lib
+    path = ctypes.util.find_library("ApplicationServices") or (
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+    )
+    lib = ctypes.CDLL(path)
+    lib.CGEventCreate.restype = ctypes.c_void_p
+    lib.CGEventCreate.argtypes = [ctypes.c_void_p]
+    lib.CGEventGetLocation.restype = _CGPoint
+    lib.CGEventGetLocation.argtypes = [ctypes.c_void_p]
+    lib.CGEventCreateMouseEvent.restype = ctypes.c_void_p
+    lib.CGEventCreateMouseEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint32, _CGPoint, ctypes.c_uint32]
+    lib.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+    lib.CFRelease.argtypes = [ctypes.c_void_p]
+    _cg_lib = lib
+    return lib
+
+
+def _cg_current_position() -> tuple[float, float]:
+    lib = _core_graphics()
+    event = lib.CGEventCreate(None)
+    try:
+        point = lib.CGEventGetLocation(event)
+        return point.x, point.y
+    finally:
+        lib.CFRelease(event)
+
+
+def _cg_post(event_type: int, x: float, y: float, button: int) -> None:
+    lib = _core_graphics()
+    event = lib.CGEventCreateMouseEvent(None, event_type, _CGPoint(x, y), button)
+    try:
+        lib.CGEventPost(_CG_HID_EVENT_TAP, event)
+    finally:
+        lib.CFRelease(event)
+
+
+def _mac_mouse_move(x: float, y: float) -> None:
+    try:
+        _cg_post(_CG_EVENT_MOUSE_MOVED, x, y, 0)
+        return
+    except (OSError, AttributeError) as exc:
+        if shutil.which("cliclick") is None:
+            raise HomeAgentError(
+                f"Native pointer control failed ({exc}) and cliclick is not installed as a fallback "
+                "(brew install cliclick). This usually means Shadow needs Accessibility permission: "
+                "System Settings -> Privacy & Security -> Accessibility."
+            ) from exc
+    _run(["cliclick", f"m:{int(x)},{int(y)}"])
+
+
+def _mac_mouse_click(x: float | None, y: float | None, button: int) -> None:
+    down = {1: _CG_EVENT_LEFT_DOWN, 2: _CG_EVENT_RIGHT_DOWN, 3: _CG_EVENT_OTHER_DOWN}.get(button, _CG_EVENT_LEFT_DOWN)
+    up = {1: _CG_EVENT_LEFT_UP, 2: _CG_EVENT_RIGHT_UP, 3: _CG_EVENT_OTHER_UP}.get(button, _CG_EVENT_LEFT_UP)
+    cg_button = _CG_MOUSE_BUTTON.get(button, 0)
+    try:
+        px, py = (x, y) if x is not None and y is not None else _cg_current_position()
+        _cg_post(down, px, py, cg_button)
+        _cg_post(up, px, py, cg_button)
+        return
+    except (OSError, AttributeError) as exc:
+        if shutil.which("cliclick") is None:
+            raise HomeAgentError(
+                f"Native pointer control failed ({exc}) and cliclick is not installed as a fallback "
+                "(brew install cliclick). This usually means Shadow needs Accessibility permission: "
+                "System Settings -> Privacy & Security -> Accessibility."
+            ) from exc
+    verb = {1: "c", 2: "rc", 3: "rc"}.get(button, "c")  # cliclick: c=left, rc=right
+    target = f"{verb}:{int(x)},{int(y)}" if x is not None and y is not None else f"{verb}:."
+    _run(["cliclick", target])
+
+
 def _mouse_move(args: dict[str, Any]) -> dict[str, Any]:
     x, y = _mouse_coordinates(args)
     if _SYS == "Darwin":
-        if shutil.which("cliclick") is None:
-            raise HomeAgentError("Install cliclick (brew install cliclick) for pointer control on macOS")
-        _run(["cliclick", f"m:{x},{y}"])
+        _mac_mouse_move(x, y)
     elif _SYS == "Windows":
         _powershell(
             "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);' "
@@ -711,11 +846,7 @@ def _mouse_click(args: dict[str, Any]) -> dict[str, Any]:
     if has_xy:
         x, y = _mouse_coordinates(args)
     if _SYS == "Darwin":
-        if shutil.which("cliclick") is None:
-            raise HomeAgentError("Install cliclick (brew install cliclick) for pointer control on macOS")
-        verb = {1: "c", 2: "rc", 3: "rc"}.get(button, "c")  # cliclick: c=left, rc=right
-        target = f"{verb}:{x},{y}" if has_xy else f"{verb}:."
-        _run(["cliclick", target])
+        _mac_mouse_click(x, y, button)
     elif _SYS == "Windows":
         down, up = {1: (0x0002, 0x0004), 2: (0x0008, 0x0010), 3: (0x0008, 0x0010)}.get(button, (0x0002, 0x0004))
         move = f"[W.M]::SetCursorPos({x},{y});" if has_xy else ""
@@ -861,7 +992,7 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
             raise HomeAgentError("media command must be play, pause, play-pause, next, previous, or stop")
         return _media(command)
     if action == "volume":
-        return _volume(int(args.get("percent", 50)))
+        return _volume(_int_arg(args, "percent", 50))
     if action == "app_launch":
         app = _need_text(args, "app", limit=60).lower()
         argv = _parse_apps().get(app)
@@ -873,7 +1004,7 @@ def execute_action(action: str, args: Any = None, *, confirmed: bool = False) ->
         if _SYS == "Darwin":
             name = _need_text(args, "title", limit=120)
             verb = "activate" if action == "app_focus" else "quit"
-            _run(["osascript", "-e", f'tell application "{name}" to {verb}'])
+            _run(["osascript", "-e", f'tell application "{_osa_str(name)}" to {verb}'])
             return {"ok": True, "title": name}
         if _SYS == "Windows":
             name = _need_text(args, "title", limit=120)
@@ -975,4 +1106,3 @@ def main() -> None:
         raise SystemExit("Refusing wildcard bind. Bind the Tailscale IP or set SHADOW_HOME_AGENT_ALLOW_WILDCARD=true explicitly.")
     print(f"Shadow home agent listening on {bind}:{port}")
     ThreadingHTTPServer((bind, port), Handler).serve_forever()
-

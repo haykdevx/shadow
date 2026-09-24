@@ -33,7 +33,7 @@ python-dateutil
 caldav
 cryptography
 bcrypt
-mcp
+mcp<2.0.0
 pyotp
 qrcode[pil]
 croniter
@@ -51,7 +51,20 @@ pytest
 pytest-asyncio
 # MTProto Telegram user-account client (real chats, not just bot API)
 telethon
+# Discord Gateway bot bridge (scripts/shadow_discord.py) — Discord has no
+# getUpdates-style polling endpoint like Telegram, only a WebSocket Gateway.
+websockets
 # Server-side per-account Chromium for the agent browser (src/browser_manager.py).
 # The browser binary itself is installed in the Docker image / via
 # `python -m playwright install chromium`.
 playwright
+# Local speech-to-text for the "local" STT provider (services/stt/stt_service.py).
+# Runs on CPU out of the box (CTranslate2 backend, no torch needed); GPU is
+# auto-detected and used if a CUDA torch install is present.
+faster-whisper
+# Local text-to-speech for the "local" TTS provider (services/tts/tts_service.py).
+# Kokoro-82M — small enough to run acceptably on CPU; GPU is used automatically
+# when available (see _KokoroPipeline). soundfile is Kokoro's own audio-array
+# dependency, not used directly by us.
+kokoro
+soundfile

@@ -22,7 +22,6 @@ import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
 import magiModule from './magi.js';
-import computerModeModule from './computerMode.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -486,33 +485,6 @@ import computerModeModule from './computerMode.js';
       }
     }
 
-    // --- Computer mode: hand off to the agent-sessions engine for this
-    // chat instead of the normal model stream. The agent works directly on
-    // the authorized folder (read/write files, run commands, git) and
-    // reports back as its own message block. ---
-    if (computerModeModule.isEnabled()) {
-      const userDisplay = (_displayOverride || msg).trim();
-      _displayOverride = null;
-      if (!_hideUserBubble) {
-        addMessage('user', userDisplay, null, null);
-      }
-      _hideUserBubble = false;
-      if (fileHandlerModule.getPendingCount()) {
-        fileHandlerModule.clearPending();
-        fileHandlerModule.renderAttachStrip();
-        uiModule.showToast('Attachments are not supported in Computer mode and were discarded', 3000);
-      }
-      el('message').value = '';
-      el('message').style.height = '';
-      el('message').dispatchEvent(new Event('input'));
-      if (uiModule.autoResize) uiModule.autoResize(el('message'));
-      uiModule.setAutoScroll(true);
-      uiModule.scrollHistoryInstant();
-      const computerSessionId = sessionModule.getCurrentSessionId();
-      _releaseSendFlag();
-      await computerModeModule.send(computerSessionId, userDisplay);
-      return;
-    }
 
     const messageInput = el('message');
     const originalBtnText = submitBtn ? submitBtn.innerHTML : '';

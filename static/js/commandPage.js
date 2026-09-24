@@ -1,5 +1,11 @@
 // Dedicated Shadow Command dashboard for private home-PC control.
+//
+// The primary Command view is now the "Shadow Console" device dashboard
+// (commandConsole.js) — imported here for its side effect of registering
+// window.shadowCommandConsole. This file remains as the enrollment /
+// advanced-panel fallback (window.__legacyCommandOpen).
 
+import './commandConsole.js';
 import { joinPath, parentPath } from './commandPaths.js';
 
 const API_ROOT = '/api/shadow';
@@ -7,6 +13,7 @@ const REFRESH_MS = 10000;
 let root = null;
 let refreshTimer = null;
 let enrollmentTimer = null;
+let enrollmentCountdownTimer = null;
 let currentPath = '';
 let lastReadFile = null;
 let selectedDeviceId = '';
@@ -27,6 +34,23 @@ let latest = {
   inspector: null,
 };
 let generatedPanels = [];
+
+const DEVICE_STORAGE_KEY = 'shadow.commandDeviceId';
+
+// Selection is client-local (this tab), not the account-wide server flag —
+// otherwise one tab picking a device silently reassigns every other open
+// tab within one refresh cycle. The server "selected" value is only used
+// as the first-load default when this browser has no preference yet.
+function getStoredDeviceId() {
+  try { return localStorage.getItem(DEVICE_STORAGE_KEY) || ''; } catch (_) { return ''; }
+}
+
+function setStoredDeviceId(id) {
+  try {
+    if (id) localStorage.setItem(DEVICE_STORAGE_KEY, id);
+    else localStorage.removeItem(DEVICE_STORAGE_KEY);
+  } catch (_) {}
+}
 
 function resetDeviceScopedState(deviceId = '') {
   selectedDeviceId = deviceId;
@@ -127,7 +151,15 @@ function setNote(id, message, kind = '') {
 
 function setBody(id, html) {
   const el = panelBody(id);
-  if (el) el.innerHTML = html;
+  if (!el) return;
+  // Every panel refresh (10s poll, device switch, action result) used to
+  // just yank innerHTML — content popped with no continuity. Dip opacity,
+  // swap, then let it settle back on the next frame so updates read as a
+  // single smooth beat instead of a flicker. Cheap because setBody() is
+  // the one choke point nearly every panel render already goes through.
+  el.classList.add('is-updating');
+  el.innerHTML = html;
+  requestAnimationFrame(() => el.classList.remove('is-updating'));
 }
 
 function actionLabel(action) {
@@ -148,6 +180,8 @@ function buildShell() {
   node.hidden = true;
   node.innerHTML = `
     <div class="command-page-inner">
+      <aside class="command-device-rail" data-command-device-rail aria-label="Your devices"></aside>
+      <div class="command-page-main">
       <header class="command-top">
         <div>
           <div class="command-kicker">SHADOW // COMMAND</div>
@@ -188,6 +222,7 @@ function buildShell() {
           <div class="command-panel-body generated-grid" data-panel-body="ai"></div>
         </section>
       </div>
+      </div>
     </div>
     <section class="command-remote-overlay" data-remote-overlay hidden>
       <header>
@@ -213,9 +248,13 @@ function panel(id, title, sub, opts = {}) {
         <span class="command-panel-chevron" aria-hidden="true">▾</span>
         <span class="command-panel-dot" data-panel-state="${esc(id)}"></span>
       </button>
-      <div class="command-panel-note" data-panel-note="${esc(id)}" hidden></div>
-      <div class="command-panel-body" data-panel-body="${esc(id)}">
-        <div class="command-loading">Loading...</div>
+      <div class="command-panel-collapse">
+        <div class="command-panel-collapse-inner">
+          <div class="command-panel-note" data-panel-note="${esc(id)}" hidden></div>
+          <div class="command-panel-body" data-panel-body="${esc(id)}">
+            <div class="command-loading">Loading...</div>
+          </div>
+        </div>
       </div>
     </section>`;
 }
@@ -242,14 +281,43 @@ function platformLabel(value = '') {
   return value || 'Unknown OS';
 }
 
+function platformGlyph(value = '') {
+  const text = String(value).toLowerCase();
+  if (text.includes('windows')) return '\u{1FA9F}';
+  if (text.includes('darwin') || text.includes('mac')) return '\u{1F34E}';
+  if (text.includes('linux')) return '\u{1F427}';
+  return '\u{1F5A5}';
+}
+
+function renderRail(devices, activeId) {
+  const rail = root?.querySelector('[data-command-device-rail]');
+  if (!rail) return;
+  // list_devices() on the server sorts by (selected, online, name), which
+  // reshuffles on every 10s poll as devices flip online/offline — fine for
+  // the management list, but it defeats a rail's whole point (switch by
+  // fixed position/muscle memory). Re-sort by enrollment order so icons
+  // hold still; online/selected state still shows via the dot and border.
+  const ordered = [...devices].sort((a, b) => (Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+  const items = ordered.map((row) => `
+    <button type="button" class="command-rail-item${row.id === activeId ? ' active' : ''}" data-device-select="${esc(row.id)}" title="${esc(row.name)} — ${esc(platformLabel(row.platform))} · ${row.online ? 'online' : 'offline'}">
+      <span class="command-rail-glyph" aria-hidden="true">${platformGlyph(row.platform)}</span>
+      <span class="command-rail-status" data-online="${row.online ? '1' : '0'}"></span>
+    </button>`).join('');
+  rail.innerHTML = `${items}<button type="button" class="command-rail-item command-rail-add" data-device-enroll title="Add a device">+</button>`;
+}
+
 function renderDevices(data) {
   latest.devices = data;
   const devices = Array.isArray(data?.devices) ? data.devices : [];
-  const selected = devices.find((row) => row.selected) || devices[0] || null;
+  const storedId = getStoredDeviceId();
+  const storedRow = storedId ? devices.find((row) => row.id === storedId) : null;
+  const selected = storedRow || devices.find((row) => row.selected) || devices[0] || null;
   const nextDeviceId = selected?.id || '';
   if (nextDeviceId !== selectedDeviceId) resetDeviceScopedState(nextDeviceId);
   else selectedDeviceId = nextDeviceId;
+  setStoredDeviceId(nextDeviceId);
   setDeviceLocked(!selected);
+  renderRail(devices, nextDeviceId);
 
   const rows = devices.map((row) => `
     <div class="command-device-row ${row.id === selectedDeviceId ? 'selected' : ''}">
@@ -310,31 +378,71 @@ async function refreshDevices() {
 
 async function createDeviceEnrollment() {
   try {
+    // Snapshot devices already on the account *before* creating the code.
+    // The poller below only fires on an id outside this set — otherwise an
+    // account that already has a device sees an immediate false-positive
+    // "Device connected" the moment the 3s poll ticks, before the new PC
+    // has even run the install command.
+    const existingIds = new Set((latest.devices?.devices || []).map((row) => row.id));
     const data = await request('/devices/enrollment', { method: 'POST' });
     const node = root.querySelector('[data-device-enrollment]');
     if (!node) return;
     node.hidden = false;
+    node.classList.remove('expired');
+    const panelSection = node.closest('.command-panel');
+    if (panelSection) {
+      panelSection.classList.remove('collapsed');
+      panelSection.querySelector('[data-panel-toggle]')?.setAttribute('aria-expanded', 'true');
+      panelSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
     const commandRows = [
       ['Linux', data.commands?.linux],
       ['macOS', data.commands?.macos],
       ['Windows (CMD / PowerShell, no dependencies)', data.commands?.windows],
     ].map(([label, command]) => `
       <div class="command-install-row">
-        <div><strong>${esc(label)}</strong><small>Code expires ${esc(new Date(data.expires_at * 1000).toLocaleTimeString())}</small></div>
+        <div><strong>${esc(label)}</strong></div>
         <code>${esc(command || '')}</code>
         <button type="button" class="command-mini" data-copy-command="${esc(command || '')}">Copy</button>
       </div>`).join('');
-    node.innerHTML = `<div class="command-enrollment-copy"><strong>Setup code ${esc(data.code)}</strong><small>Run one command on the PC you want this account to own. The code is single-use.</small></div>${commandRows}`;
+    node.innerHTML = `
+      <div class="command-enrollment-copy">
+        <strong>Setup code ${esc(data.code)}</strong>
+        <small>Run one command on the PC you want this account to own. The code is single-use.</small>
+        <small class="command-enrollment-countdown" data-enrollment-countdown></small>
+      </div>
+      ${commandRows}`;
     toast('Device setup code created');
+
+    const expiresAtMs = Number(data.expires_at) * 1000;
+    const countdownEl = node.querySelector('[data-enrollment-countdown]');
+    const tickCountdown = () => {
+      if (!countdownEl) return;
+      const remaining = Math.round((expiresAtMs - Date.now()) / 1000);
+      if (remaining <= 0) {
+        countdownEl.textContent = 'Code expired — create a new setup code.';
+        node.classList.add('expired');
+        if (enrollmentCountdownTimer) clearInterval(enrollmentCountdownTimer);
+        enrollmentCountdownTimer = null;
+        return;
+      }
+      const mins = Math.floor(remaining / 60);
+      const secs = remaining % 60;
+      countdownEl.textContent = `Expires in ${mins}:${String(secs).padStart(2, '0')}`;
+    };
+    if (enrollmentCountdownTimer) clearInterval(enrollmentCountdownTimer);
+    tickCountdown();
+    enrollmentCountdownTimer = setInterval(tickCountdown, 1000);
+
     if (enrollmentTimer) clearInterval(enrollmentTimer);
     enrollmentTimer = setInterval(async () => {
       try {
         const devices = await request('/devices');
-        if ((devices.devices || []).length) {
-          clearInterval(enrollmentTimer);
-          enrollmentTimer = null;
+        const fresh = (devices.devices || []).find((row) => !existingIds.has(row.id));
+        if (fresh) {
+          stopEnrollmentTimer();
           await bootstrapPage();
-          toast('Device connected');
+          toast(`Device connected: ${fresh.name}`);
         }
       } catch (_) {}
     }, 3000);
@@ -345,6 +453,7 @@ async function createDeviceEnrollment() {
 
 async function selectDevice(id) {
   try {
+    setStoredDeviceId(id);
     await request(`/devices/${encodeURIComponent(id)}/select`, { method: 'POST' });
     resetDeviceScopedState(id);
     await bootstrapPage();
@@ -357,6 +466,7 @@ async function removeDevice(id) {
   if (!window.confirm('Remove this device from your Shadow account?')) return;
   try {
     await request(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (getStoredDeviceId() === id) setStoredDeviceId('');
     toast('Device removed');
     await bootstrapPage();
   } catch (error) {
@@ -1548,6 +1658,8 @@ function stopTimers() {
 function stopEnrollmentTimer() {
   if (enrollmentTimer) clearInterval(enrollmentTimer);
   enrollmentTimer = null;
+  if (enrollmentCountdownTimer) clearInterval(enrollmentCountdownTimer);
+  enrollmentCountdownTimer = null;
 }
 
 function ensureRoot() {
@@ -1569,17 +1681,34 @@ async function bootstrapPage() {
   await refreshAll({ includeScreen: false, skipAccess: true });
 }
 
+let closePageTimer = null;
+
 function openPage(options = {}) {
+  if (closePageTimer) {
+    clearTimeout(closePageTimer);
+    closePageTimer = null;
+  }
   const push = options.push !== false;
   const node = ensureRoot();
   node.hidden = false;
+  // Two ticks: [hidden] removal must actually paint before the class flips,
+  // or the browser collapses "removed display:none" + "opacity:1" into one
+  // frame and there's nothing to transition from.
+  requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add('is-open')));
   document.body.classList.add('command-page-open');
   if (push) navTo('/command');
   bootstrapPage();
 }
 
 function closePage() {
-  if (root) root.hidden = true;
+  if (root) {
+    root.classList.remove('is-open');
+    if (closePageTimer) clearTimeout(closePageTimer);
+    closePageTimer = setTimeout(() => {
+      if (root && !root.classList.contains('is-open')) root.hidden = true;
+      closePageTimer = null;
+    }, 260);
+  }
   document.body.classList.remove('command-page-open');
   stopTimers();
   stopEnrollmentTimer();
@@ -1587,8 +1716,21 @@ function closePage() {
   if (window.location.pathname === '/command') navTo('/');
 }
 
+// The Command view is now the "Shadow Console" (commandConsole.js). This
+// legacy page stays available as the enrollment / advanced fallback: the
+// console's "+" (enroll a device) calls window.__legacyCommandOpen().
+function openCommand(options = {}) {
+  if (window.shadowCommandConsole && typeof window.shadowCommandConsole.open === 'function') {
+    window.shadowCommandConsole.open();
+    if (options.push !== false) navTo('/command');
+    return;
+  }
+  openPage(options); // fallback if the console module didn't load
+}
+
 function init() {
-  document.getElementById('tool-command-btn')?.addEventListener('click', () => openPage());
+  window.__legacyCommandOpen = () => openPage({ push: false });
+  document.getElementById('tool-command-btn')?.addEventListener('click', () => openCommand());
   document.addEventListener('visibilitychange', () => {
     if (!root || root.hidden) return;
     if (document.hidden) stopTimers();
@@ -1597,8 +1739,11 @@ function init() {
     }
   });
   window.addEventListener('popstate', () => {
-    if (window.location.pathname === '/command') openPage({ push: false });
-    else if (root && !root.hidden) closePage();
+    if (window.location.pathname === '/command') openCommand({ push: false });
+    else {
+      if (window.shadowCommandConsole) window.shadowCommandConsole.close();
+      if (root && !root.hidden) closePage();
+    }
   });
 }
 

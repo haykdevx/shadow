@@ -1312,12 +1312,23 @@ export async function loadSessions() {
     let fetched;
     if (prefetched) {
       sessionStorage.removeItem('shd-prefetch-sessions');
-      fetched = JSON.parse(prefetched);
-    } else {
+      // Guard the parse: a malformed / stale prefetch blob must not crash the
+      // whole session list. If it isn't a clean array, fall through to the
+      // real endpoint rather than letting `sessions.filter` throw downstream.
+      try { fetched = JSON.parse(prefetched); } catch (_) { fetched = null; }
+    }
+    // Re-fetch when the prefetch was missing, malformed, OR an empty snapshot.
+    // The login page's prefetch can capture an empty array before sessions are
+    // ready; trusting it verbatim left the sidebar permanently empty until a
+    // manual reload. An empty prefetch is never worth keeping — fetch fresh.
+    if (!Array.isArray(fetched) || fetched.length === 0) {
       const res = await fetch(`${API_BASE}/api/sessions`);
       fetched = await res.json();
     }
-    sessions = fetched;
+    // Final belt-and-suspenders: `sessions` is assumed to be an array by
+    // every consumer (.filter/.find/.length). Never let it become anything
+    // else, whatever the server or a stale prefetch returned.
+    sessions = Array.isArray(fetched) ? fetched : [];
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');

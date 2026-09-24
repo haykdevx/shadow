@@ -22,7 +22,8 @@ if [ ! -s "$CONFIG" ]; then
     --arg session "$SESSION_KEY" \
     '.settings.cert = $host
      | .settings.sessionKey = $session
-     | .domains.remote.allowedFramingOrigins = [$origin]' \
+     | .domains.remote.allowedFramingOrigins = [$origin]
+     | .domains.remote.certUrl = $origin' \
     "$TEMPLATE" > "$CONFIG"
 else
   tmp="${CONFIG}.tmp"
@@ -30,7 +31,8 @@ else
     --arg host "$PUBLIC_HOST" \
     --arg origin "$PUBLIC_ORIGIN" \
     '.settings.cert = $host
-     | .domains.remote.allowedFramingOrigins = [$origin]' \
+     | .domains.remote.allowedFramingOrigins = [$origin]
+     | .domains.remote.certUrl = $origin' \
     "$CONFIG" > "$tmp"
   mv "$tmp" "$CONFIG"
 fi

@@ -23,7 +23,6 @@ const PRIV_LABELS = {
   can_use_agent: 'Agent mode',
   can_use_browser: 'Browser automation',
   can_use_bash: 'Shell / Python / Files',
-  can_use_computer: 'Computer access (full device control)',
   can_use_documents: 'Document editor',
   can_use_research: 'Deep research',
   can_generate_images: 'Image generation',
@@ -2034,69 +2033,11 @@ function initDangerZone() {
 }
 
 /* ═══════════════════════════════════════════
-   SYSTEM TAB — Computer Access Audit Log
-   ═══════════════════════════════════════════ */
-let _auditBefore = null;
-let _auditEvent = '';
-
-async function loadAuditLog(reset = true) {
-  const list = el('adm-auditList');
-  if (!list) return;
-  if (reset) { _auditBefore = null; list.innerHTML = '<div class="admin-empty">Loading...</div>'; }
-  const moreBtn = el('adm-auditLoadMore');
-  try {
-    const params = new URLSearchParams({ limit: '50' });
-    if (_auditEvent) params.set('event', _auditEvent);
-    if (_auditBefore) params.set('before', String(_auditBefore));
-    const res = await fetch(`/api/workspace-agent/audit?${params}`, { credentials: 'same-origin' });
-    if (res.status === 401 || res.status === 403) { list.innerHTML = '<div class="admin-empty">Access denied</div>'; if (moreBtn) moreBtn.hidden = true; return; }
-    const data = await res.json();
-    const events = data.events || [];
-    if (reset) list.innerHTML = '';
-    if (!events.length) {
-      if (reset) list.innerHTML = '<div class="admin-empty">No activity recorded yet</div>';
-      if (moreBtn) moreBtn.hidden = true;
-      return;
-    }
-    for (const ev of events) {
-      const row = document.createElement('div');
-      row.className = 'admin-audit-row';
-      const when = ev.ts ? new Date(ev.ts * 1000).toLocaleString() : '';
-      const detail = ev.detail || {};
-      const summary = detail.summary || detail.reason || detail.action || detail.root || '';
-      row.innerHTML = `
-        <div class="admin-audit-time">${esc(when)}</div>
-        <div class="admin-audit-main">
-          <span class="admin-audit-event">${esc(ev.event || '')}</span>
-          ${data.is_admin ? `<span class="admin-audit-owner">${esc(ev.owner || '')}</span>` : ''}
-          ${summary ? `<div class="admin-audit-summary">${esc(summary)}</div>` : ''}
-        </div>
-      `;
-      list.appendChild(row);
-      _auditBefore = ev.ts;
-    }
-    if (moreBtn) moreBtn.hidden = events.length < 50;
-  } catch (e) {
-    if (reset) list.innerHTML = `<div class="admin-empty">Failed to load: ${esc(e.message)}</div>`;
-    if (moreBtn) moreBtn.hidden = true;
-  }
-}
-
-function initAuditLog() {
-  const refreshBtn = el('adm-auditRefresh');
-  const filterSel = el('adm-auditFilter');
-  const moreBtn = el('adm-auditLoadMore');
-  if (refreshBtn) refreshBtn.addEventListener('click', () => loadAuditLog(true));
-  if (filterSel) filterSel.addEventListener('change', () => { _auditEvent = filterSel.value; loadAuditLog(true); });
-  if (moreBtn) moreBtn.addEventListener('click', () => loadAuditLog(false));
-}
-
-/* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initAuditLog, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
@@ -2109,7 +2050,6 @@ function refreshAll() {
   loadEndpoints();
   loadBuiltinTools();
   loadMcpServers();
-  loadAuditLog();
 }
 
 /* ═══════════════════════════════════════════

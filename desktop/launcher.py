@@ -49,7 +49,15 @@ ENV_TEMPLATE = Path(__file__).resolve().parent / "shadow-desktop.env.example"
 SERVICES = os.getenv("SHADOW_DESKTOP_SERVICES", "shadow bgutil-pot").split()
 APP_BIND = os.getenv("APP_BIND", "127.0.0.1")
 APP_PORT = os.getenv("APP_PORT", "7000")
-APP_URL = os.getenv("SHADOW_DESKTOP_URL", f"http://{APP_BIND}:{APP_PORT}")
+# REMOTE_MODE: the caller explicitly named a server to connect to (their own
+# VPS deployment) rather than "run this stack right here." Everything about
+# local Docker orchestration — the preflight check, the image build, the
+# stop-on-exit — only makes sense in local mode, so it's all gated on this.
+# Checked via the raw env var, not APP_URL, so a locally-set APP_BIND/PORT
+# combination that happens to equal the default can't be mistaken for it.
+SHADOW_DESKTOP_URL = os.getenv("SHADOW_DESKTOP_URL", "").strip()
+REMOTE_MODE = bool(SHADOW_DESKTOP_URL)
+APP_URL = SHADOW_DESKTOP_URL or f"http://{APP_BIND}:{APP_PORT}"
 HEALTH_URL = f"{APP_URL.rstrip('/')}/api/health"
 START_TIMEOUT = int(os.getenv("SHADOW_DESKTOP_TIMEOUT", "900"))  # first build is slow
 # Keep the stack running when the window closes (default) so the app stays
@@ -438,15 +446,21 @@ def _run_gui_pywebview(base: list[str]) -> int:
 
     def worker() -> None:
         try:
-            ensure_env()
-            start_stack(base)
+            if not REMOTE_MODE:
+                ensure_env()
+                start_stack(base)
             # The splash tagline stays put ("i know where you live"); the
-            # animated bar conveys progress through the first-run build.
+            # animated bar conveys progress through the first-run build (or,
+            # in remote mode, just the network round-trip to your server).
             if not wait_for_health(START_TIMEOUT):
-                window.load_html(error_html(
+                hint = (
+                    f"Could not reach {APP_URL} within {START_TIMEOUT}s.\n"
+                    f"Check your internet connection and that the server is running."
+                    if REMOTE_MODE else
                     f"Shadow did not become healthy within {START_TIMEOUT}s.\n"
                     f"Check container logs:  docker compose logs shadow"
-                ))
+                )
+                window.load_html(error_html(hint))
                 return
             window.load_url(APP_URL)
         except SystemExit as exc:
@@ -472,20 +486,26 @@ def _run_gui_pywebview(base: list[str]) -> int:
     webview.start(
         worker, private_mode=False, storage_path=storage_path, user_agent=user_agent,
     )  # blocks until closed
-    if STOP_ON_EXIT:
+    if STOP_ON_EXIT and not REMOTE_MODE:
         stop_stack(base)
     return 0
 
 
-def run_headless(base: list[str]) -> int:
-    ensure_env()
-    start_stack(base)
+def run_headless(base: list[str] | None) -> int:
+    if REMOTE_MODE:
+        log(f"remote mode: connecting to {APP_URL} (no local Docker involved)")
+    else:
+        ensure_env()
+        start_stack(base)
     log("waiting for health…")
     if not wait_for_health(START_TIMEOUT, on_status=lambda s: log(s)):
         log(f"app did not become healthy within {START_TIMEOUT}s")
         return 1
     log(f"Shadow is up at {APP_URL}")
-    log("(--headless: not opening a window; use --stop to shut the stack down)")
+    if REMOTE_MODE:
+        log("(--headless: not opening a window)")
+    else:
+        log("(--headless: not opening a window; use --stop to shut the stack down)")
     return 0
 
 
@@ -499,16 +519,26 @@ def main() -> int:
                         help="stop the parity services and exit")
     args = parser.parse_args()
 
-    base = preflight()
+    # Remote mode (SHADOW_DESKTOP_URL points at an existing server, e.g. your
+    # own VPS deployment) never touches local Docker at all — no engine
+    # required on this machine, nothing to preflight, nothing to build.
+    base = None if REMOTE_MODE else preflight()
 
     if args.check:
+        if REMOTE_MODE:
+            ok = wait_for_health(15)
+            log(f"remote mode: {APP_URL} " + ("reachable" if ok else "NOT reachable"))
+            return 0 if ok else 1
         ok = compose_config_ok(base)
         log("compose config OK" if ok else "compose config FAILED")
         log(f"services={SERVICES}  url={APP_URL}  health={HEALTH_URL}")
         return 0 if ok else 1
 
     if args.stop:
-        stop_stack(base)
+        if REMOTE_MODE:
+            log("remote mode: nothing local to stop (connected to a remote server)")
+        else:
+            stop_stack(base)
         return 0
 
     if args.headless:

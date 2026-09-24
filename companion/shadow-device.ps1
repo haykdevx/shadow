@@ -146,7 +146,7 @@ function Save-ShadowEnrollment {
         [Parameter(Mandatory = $true)][string]$Code,
         [string]$DeviceName = ""
     )
-    if ($BaseUrl -notmatch "^https://" -and $BaseUrl -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?$") {
+    if ($BaseUrl -notmatch "^https://" -and $BaseUrl -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?/?$") {
         throw "Shadow server must use HTTPS (HTTP is allowed only for localhost)."
     }
     $payload = Get-ShadowMetadata $DeviceName

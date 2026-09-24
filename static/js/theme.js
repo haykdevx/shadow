@@ -28,9 +28,14 @@ export const THEMES = {
                             inputBg: '#2f2f2f' } },
   claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
+  // Shadow's own signature look — the "refined console" identity: deep
+  // graphite (not blue-tinted like the old dark default), a neutral warm
+  // off-white foreground instead of cyan, and the existing brand coral
+  // refined rather than replaced. Matches the reviewed Command redesign.
+  shadow:     { bg:'#0a0b0d', fg:'#e9e8e5', panel:'#131519', border:'#262a31', red:'#e8737f' },
 };
 
-const DEFAULT_THEME = 'dark';
+const DEFAULT_THEME = 'shadow';
 const LS_KEY = 'shadow-theme';
 const CUSTOM_THEMES_KEY = 'shadow-custom-themes';
 
@@ -39,7 +44,7 @@ const FONT_MAP = {
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
 };
-const DEFAULT_FONT = 'mono';
+const DEFAULT_FONT = 'sans';
 const DEFAULT_DENSITY = 'comfortable';
 const MAX_CUSTOM_THEMES = 8;
 

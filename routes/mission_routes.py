@@ -1,4 +1,4 @@
-"""HTTP surface for desktop workspaces, direct agent sessions, and permissions.
+"""HTTP surface for Autonomous Missions, Desktop Workspaces, and permissions.
 
 Every route requires an interactive Shadow session (cookie). API tokens and
 the internal agent bridge are rejected on purpose: approvals, permission-mode
@@ -15,19 +15,19 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.auth_helpers import require_privilege, require_user
-from src import agent_sessions, workspace_service
+from src.auth_helpers import require_user
+from src import agent_sessions, mission_engine, mission_workspaces
 from src.agent_sessions import AgentSessionError
-from src.workspace_policy import (
-    WorkspacePolicyError,
+from src.mission_engine import MissionError
+from src.mission_policy import (
+    MissionPolicyError,
     arm_full_access,
     disarm_full_access,
     full_access_active,
     list_persistent_rules,
-    read_audit_log,
     revoke_persistent_rule,
 )
-from src.workspace_service import (
+from src.mission_workspaces import (
     WorkspaceApprovalRequired,
     WorkspaceDenied,
     WorkspaceError,
@@ -46,16 +46,6 @@ def _session_id(request: Request) -> str:
     return str(request.cookies.get("shadow_session") or "")[:32]
 
 
-def _require_computer_access(request: Request) -> str:
-    """Gate every workspace-agent write/dispatch path on one privilege.
-
-    Computer access grants filesystem and command execution on an enrolled
-    device — strictly more powerful than ``can_use_bash`` — so it is opt-in
-    per account (admins always have it via ``ADMIN_PRIVILEGES``).
-    """
-    return require_privilege(request, "can_use_computer")
-
-
 class WorkspaceCreateRequest(BaseModel):
     device_id: str = Field(..., min_length=4, max_length=80)
     root: str = Field(..., min_length=1, max_length=1000)
@@ -71,6 +61,22 @@ class WorkspaceActionRequest(BaseModel):
     action: str = Field(..., max_length=40)
     args: dict[str, Any] = Field(default_factory=dict)
     mode: str | None = Field(default=None, pattern="^(ask|auto|full|unattended)$")
+
+
+class MissionCreateRequest(BaseModel):
+    workspace_id: str = Field(..., min_length=4, max_length=40)
+    goal: str = Field(..., min_length=8, max_length=4000)
+    mode: str = Field(default="auto", pattern="^(ask|auto|full|unattended)$")
+    allow_network: bool = False
+    roles: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class ClarifyRequest(BaseModel):
+    answer: str = Field(..., min_length=1, max_length=2000)
+
+
+class ApprovalRequest(BaseModel):
+    decision: str = Field(..., pattern="^(allow_once|allow_mission|allow_always|decline|stop_mission)$")
 
 
 class RollbackRequest(BaseModel):
@@ -107,21 +113,21 @@ class SessionApprovalRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     grant_key: str = Field(..., min_length=3, max_length=300)
-    scope: str = Field(..., pattern="^(once|session|workspace)$")
+    scope: str = Field(..., pattern="^(once|mission|session|workspace)$")
     workspace_id: str = Field(default="", max_length=40)
+    mission_id: str = Field(default="", max_length=40)
     summary: str = Field(default="", max_length=300)
 
 
-def setup_workspace_agent_routes() -> APIRouter:
-    router = APIRouter(prefix="/api/workspace-agent", tags=["workspace-agent"])
+def setup_mission_routes() -> APIRouter:
+    router = APIRouter(prefix="/api/missions", tags=["missions"])
 
     # ── workspaces ──────────────────────────────────────────────────────
 
     @router.get("/workspaces")
     def workspaces_list(request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
-        rows = workspace_service.list_workspaces(user)
+        rows = mission_workspaces.list_workspaces(user)
         for row in rows:
             row["full_access"] = bool(full_access_active(user, row.get("device_id") or ""))
         return {"workspaces": rows}
@@ -129,32 +135,30 @@ def setup_workspace_agent_routes() -> APIRouter:
     @router.post("/workspaces")
     def workspaces_create(payload: WorkspaceCreateRequest, request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
         from src.shadow_devices import ShadowDeviceError
         try:
-            return workspace_service.create_workspace(
+            return mission_workspaces.create_workspace(
                 user, payload.device_id, payload.root, payload.name, payload.mode)
         except ShadowDeviceError as exc:
             raise HTTPException(404, str(exc)) from exc
-        except (WorkspaceError, WorkspacePolicyError) as exc:
+        except (WorkspaceError, MissionPolicyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @router.delete("/workspaces/{workspace_id}")
     def workspaces_remove(workspace_id: str, request: Request):
         try:
-            return workspace_service.remove_workspace(_real_user(request), workspace_id)
+            return mission_workspaces.remove_workspace(_real_user(request), workspace_id)
         except WorkspaceError as exc:
             raise HTTPException(404, str(exc)) from exc
 
     @router.put("/workspaces/{workspace_id}/mode")
     def workspaces_mode(workspace_id: str, payload: WorkspaceModeRequest, request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
         try:
-            workspace = workspace_service.get_workspace(user, workspace_id)
+            workspace = mission_workspaces.get_workspace(user, workspace_id)
             if payload.mode == "full" and not full_access_active(user, workspace["device_id"]):
                 raise HTTPException(403, "Arm full access first (password reauthentication required)")
-            return workspace_service.set_workspace_mode(user, workspace_id, payload.mode)
+            return mission_workspaces.set_workspace_mode(user, workspace_id, payload.mode)
         except WorkspaceError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -166,14 +170,13 @@ def setup_workspace_agent_routes() -> APIRouter:
         requires explicit approval — the UI then offers allow once / always.
         """
         user = _real_user(request)
-        _require_computer_access(request)
         if payload.mode == "full":
-            workspace = workspace_service.get_workspace(user, workspace_id)
+            workspace = mission_workspaces.get_workspace(user, workspace_id)
             if not full_access_active(user, workspace["device_id"]):
                 raise HTTPException(403, "Full access is not armed for this device")
         try:
             result = await asyncio.to_thread(
-                workspace_service.dispatch,
+                mission_workspaces.dispatch,
                 user, workspace_id, payload.action, payload.args,
                 mode=payload.mode, session_id=_session_id(request),
             )
@@ -190,7 +193,7 @@ def setup_workspace_agent_routes() -> APIRouter:
             }
         except WorkspaceDenied as exc:
             raise HTTPException(403, str(exc)) from exc
-        except (WorkspaceError, WorkspacePolicyError) as exc:
+        except (WorkspaceError, MissionPolicyError) as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — device/relay errors
             raise HTTPException(502, str(exc)[:300]) from exc
@@ -199,15 +202,15 @@ def setup_workspace_agent_routes() -> APIRouter:
 
     @router.post("/policy/grants")
     def policy_grant(payload: GrantRequest, request: Request):
-        """Record a user-approved grant (allow once / session / always)."""
+        """Record a user-approved grant (allow once / mission / session / always)."""
         user = _real_user(request)
-        from src.workspace_policy import GRANTS
+        from src.mission_policy import GRANTS
         try:
-            scope_id = _session_id(request)
+            scope_id = payload.mission_id if payload.scope in ("once", "mission") else _session_id(request)
             row = GRANTS.grant(user, payload.scope, scope_id, payload.grant_key,
                                workspace_id=payload.workspace_id, summary=payload.summary)
             return {"ok": True, "grant": row}
-        except WorkspacePolicyError as exc:
+        except MissionPolicyError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @router.get("/policy/rules")
@@ -223,11 +226,10 @@ def setup_workspace_agent_routes() -> APIRouter:
     @router.post("/policy/full-access")
     def policy_full_access(payload: FullAccessRequest, request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
         try:
             return arm_full_access(user, payload.device_id, password=payload.password,
                                    duration_seconds=payload.duration_seconds)
-        except WorkspacePolicyError as exc:
+        except MissionPolicyError as exc:
             raise HTTPException(403, str(exc)) from exc
 
     @router.delete("/policy/full-access/{device_id}")
@@ -240,18 +242,17 @@ def setup_workspace_agent_routes() -> APIRouter:
         row = full_access_active(_real_user(request), device_id)
         return {"armed": bool(row), "expires_at": (row or {}).get("expires_at")}
 
-    # ── agent sessions (direct conversational tool loop) ───────────────
+    # ── agent sessions (direct tool loop, no planner DAG) ─────────────
+    # Defined before the /{mission_id} routes so "/sessions" never matches
+    # the mission-id path parameter.
 
     @router.get("/sessions")
     def sessions_list(request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
-        return {"sessions": agent_sessions.list_sessions(user)}
+        return {"sessions": agent_sessions.list_sessions(_real_user(request))}
 
     @router.post("/sessions")
     async def sessions_create(payload: SessionCreateRequest, request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
         try:
             session = agent_sessions.create_session(
                 user, payload.workspace_id, payload.task,
@@ -266,17 +267,14 @@ def setup_workspace_agent_routes() -> APIRouter:
 
     @router.get("/sessions/{sid}")
     def session_detail(sid: str, request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
         try:
-            return agent_sessions.load_session(user, sid)
+            return agent_sessions.load_session(_real_user(request), sid)
         except AgentSessionError as exc:
             raise HTTPException(404, str(exc)) from exc
 
     @router.post("/sessions/{sid}/message")
     async def session_message(sid: str, payload: SessionMessageRequest, request: Request):
         user = _real_user(request)
-        _require_computer_access(request)
         try:
             result = agent_sessions.send_message(user, sid, payload.text)
             if not result.get("running"):
@@ -297,31 +295,25 @@ def setup_workspace_agent_routes() -> APIRouter:
 
     @router.post("/sessions/{sid}/resume")
     async def session_resume(sid: str, request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
         try:
-            return agent_sessions.retry_session(user, sid)
+            return agent_sessions.retry_session(_real_user(request), sid)
         except AgentSessionError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @router.post("/sessions/{sid}/retry")
     async def session_retry(sid: str, payload: SessionRetryRequest, request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
         try:
             return agent_sessions.retry_session(
-                user, sid,
+                _real_user(request), sid,
                 endpoint_id=payload.endpoint_id, model=payload.model)
         except AgentSessionError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @router.post("/sessions/{sid}/rollback")
     async def session_rollback(sid: str, payload: RollbackRequest, request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
         try:
             return await agent_sessions.rollback_session(
-                user, sid, paths=payload.paths)
+                _real_user(request), sid, paths=payload.paths)
         except AgentSessionError as exc:
             raise HTTPException(400, str(exc)) from exc
         except (WorkspaceDenied, WorkspaceError) as exc:
@@ -332,37 +324,107 @@ def setup_workspace_agent_routes() -> APIRouter:
     @router.post("/sessions/{sid}/approvals/{approval_id}")
     async def session_approval(sid: str, approval_id: str,
                                payload: SessionApprovalRequest, request: Request):
-        user = _real_user(request)
-        _require_computer_access(request)
         try:
             return agent_sessions.resolve_approval(
-                user, sid, approval_id, payload.decision)
+                _real_user(request), sid, approval_id, payload.decision)
         except AgentSessionError as exc:
             raise HTTPException(404, str(exc)) from exc
-        except WorkspacePolicyError as exc:
+        except MissionPolicyError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    # ── audit log ────────────────────────────────────────────────────────
+    # ── missions ────────────────────────────────────────────────────────
 
-    @router.get("/audit")
-    def audit_log(request: Request, limit: int = 100, before: float | None = None, event: str = ""):
-        """Recent workspace-agent audit records.
+    @router.get("")
+    def missions_list(request: Request):
+        return {"missions": mission_engine.list_missions(_real_user(request))}
 
-        Admins see every account's activity; everyone else sees only their
-        own — the same scoping ``list_workspaces``/``list_sessions`` use.
-        """
+    @router.get("/models")
+    def missions_models(request: Request):
+        return {"available": mission_engine.available_role_targets(_real_user(request)),
+                "roles": list(mission_engine.ROLES)}
+
+    @router.post("")
+    async def missions_create(payload: MissionCreateRequest, request: Request):
         user = _real_user(request)
-        auth_mgr = getattr(request.app.state, "auth_manager", None)
         try:
-            is_admin = bool(auth_mgr and auth_mgr.is_admin(user))
-        except Exception:
-            is_admin = False
-        records = read_audit_log(
-            owner=None if is_admin else user,
-            event=event.strip()[:80],
-            before=before,
-            limit=limit,
-        )
-        return {"events": records, "is_admin": is_admin}
+            mission = mission_engine.create_mission(
+                user, payload.workspace_id, payload.goal,
+                mode=payload.mode, roles=payload.roles,
+                allow_network=payload.allow_network,
+            )
+            await mission_engine.plan_mission(mission)
+            return mission_engine.load_mission(user, mission["id"])
+        except (MissionError, WorkspaceError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/{mission_id}")
+    def mission_detail(mission_id: str, request: Request):
+        try:
+            return mission_engine.load_mission(_real_user(request), mission_id)
+        except MissionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @router.post("/{mission_id}/clarify")
+    async def mission_clarify(mission_id: str, payload: ClarifyRequest, request: Request):
+        user = _real_user(request)
+        try:
+            mission = mission_engine.load_mission(user, mission_id)
+            if mission.get("status") != "clarifying":
+                raise MissionError("Mission is not waiting for a clarification")
+            await mission_engine.plan_mission(mission, answer=payload.answer)
+            return mission_engine.load_mission(user, mission_id)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/{mission_id}/start")
+    async def mission_start(mission_id: str, request: Request):
+        try:
+            return mission_engine.start_mission(_real_user(request), mission_id)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/{mission_id}/pause")
+    async def mission_pause(mission_id: str, request: Request):
+        try:
+            return mission_engine.pause_mission(_real_user(request), mission_id)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/{mission_id}/resume")
+    async def mission_resume(mission_id: str, request: Request):
+        try:
+            return mission_engine.resume_mission(_real_user(request), mission_id)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/{mission_id}/stop")
+    async def mission_stop(mission_id: str, request: Request):
+        try:
+            return mission_engine.stop_mission(_real_user(request), mission_id)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/{mission_id}/rollback")
+    async def mission_rollback(mission_id: str, payload: RollbackRequest, request: Request):
+        try:
+            return await mission_engine.rollback_mission(
+                _real_user(request), mission_id, paths=payload.paths)
+        except MissionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (WorkspaceDenied, WorkspaceError) as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, str(exc)[:300]) from exc
+
+    @router.post("/{mission_id}/approvals/{approval_id}")
+    async def mission_approval(mission_id: str, approval_id: str, payload: ApprovalRequest, request: Request):
+        try:
+            return mission_engine.resolve_approval(
+                _real_user(request), mission_id, approval_id, payload.decision,
+                session_id=_session_id(request))
+        except MissionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except MissionPolicyError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     return router

@@ -54,8 +54,12 @@ class _Starter(QThread):
 
     def run(self):
         try:
-            launcher.ensure_env()
-            launcher.start_stack(self.base)
+            # REMOTE_MODE (SHADOW_DESKTOP_URL set): connecting to an existing
+            # server, e.g. the user's own VPS deployment — no local Docker
+            # engine required or touched, just wait for that server to answer.
+            if not launcher.REMOTE_MODE:
+                launcher.ensure_env()
+                launcher.start_stack(self.base)
             self.done.emit(launcher.wait_for_health(launcher.START_TIMEOUT))
         except Exception as exc:  # noqa: BLE001
             launcher.log(f"startup failed: {exc}")
@@ -132,7 +136,8 @@ class Shell(QMainWindow):
         newtab.setToolTip("New browser tab")
         newtab.triggered.connect(lambda: self.add_browser_tab())
         self.tabs.setCornerWidget(self._corner(newtab))
-        for seq, fn in (("Ctrl+T", lambda: self.add_browser_tab()),
+        for seq, fn in (("Ctrl+K", self._open_palette),
+                        ("Ctrl+T", lambda: self.add_browser_tab()),
                         ("Ctrl+W", lambda: self._close_tab(self.tabs.currentIndex())),
                         ("Ctrl+L", lambda: (self.bar.setFocus(), self.bar.selectAll()))):
             a = QAction(self); a.setShortcut(QKeySequence(seq)); a.triggered.connect(fn)
@@ -148,6 +153,13 @@ class Shell(QMainWindow):
         self._starter = _Starter(base)
         self._starter.done.connect(self._on_ready)
         self._starter.start()
+
+    def _open_palette(self):
+        self.tabs.setCurrentWidget(self.app_view)
+        self.app_view.setFocus()
+        self.app_view.page().runJavaScript(
+            "if (window.shadowCommandConsole) window.shadowCommandConsole.openPalette();"
+        )
 
     # -- chrome helpers ---------------------------------------------------- #
     def _tb(self, text, fn, shortcut):
@@ -181,7 +193,7 @@ class Shell(QMainWindow):
 
     def _close_tab(self, idx: int):
         view = self.tabs.widget(idx)
-        if view is self.app_view:   # never close the app tab
+        if view is None or view is self.app_view:   # never close the app tab
             return
         self.tabs.removeTab(idx)
         view.deleteLater()
@@ -206,7 +218,7 @@ class Shell(QMainWindow):
         self.tabs.tabBar().setVisible(self.tabs.count() > 1)
 
     def _sync(self, view):
-        if view is self._cur() and not getattr(view, "_is_app", False):
+        if view is not None and view is self._cur() and not getattr(view, "_is_app", False):
             self.bar.setText(view.url().toString())
             self.bar.setCursorPosition(0)
 
@@ -224,10 +236,14 @@ class Shell(QMainWindow):
         if ok:
             self.app_view.setUrl(QUrl(APP_URL))
         else:
-            self.app_view.setHtml(launcher.error_html(
+            hint = (
+                f"Could not reach {APP_URL} within {launcher.START_TIMEOUT}s.\n"
+                "Check your internet connection and that the server is running."
+                if launcher.REMOTE_MODE else
                 f"Shadow did not become healthy within {launcher.START_TIMEOUT}s.\n"
                 "Check container logs:  docker compose logs shadow"
-            ), QUrl(APP_URL))
+            )
+            self.app_view.setHtml(launcher.error_html(hint), QUrl(APP_URL))
 
 
 def run(base) -> int:
@@ -237,6 +253,6 @@ def run(base) -> int:
     win = Shell(base)
     win.show()
     rc = app.exec()
-    if launcher.STOP_ON_EXIT:
+    if launcher.STOP_ON_EXIT and not launcher.REMOTE_MODE:
         launcher.stop_stack(base)
     return rc

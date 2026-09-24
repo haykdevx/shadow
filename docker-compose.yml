@@ -118,6 +118,28 @@ services:
       - shadow
     restart: unless-stopped
 
+  shadow-discord:
+    build: .
+    profiles: ["discord"]
+    command: ["python", "scripts/shadow_discord.py"]
+    volumes:
+      - ./data:/app/data:z
+    environment:
+      - SHADOW_DISCORD_BOT_TOKEN=${SHADOW_DISCORD_BOT_TOKEN:-}
+      - SHADOW_HOME_AGENT_URL=${SHADOW_HOME_AGENT_URL:-}
+      - SHADOW_HOME_AGENT_SOCKET=${SHADOW_HOME_AGENT_SOCKET:-}
+      - SHADOW_HOME_AGENT_TOKEN=${SHADOW_HOME_AGENT_TOKEN:-}
+      - SHADOW_HOME_AGENT_ALLOW_PUBLIC=${SHADOW_HOME_AGENT_ALLOW_PUBLIC:-false}
+      - SHADOW_PC_CONFIRM_TTL_SECONDS=${SHADOW_PC_CONFIRM_TTL_SECONDS:-300}
+      - SHADOW_PC_OWNER=${SHADOW_PC_OWNER:-}
+      - SHADOW_PC_ACCESS_PATH=${SHADOW_PC_ACCESS_PATH:-data/shadow-pc-access.json}
+      - SHADOW_DEVICES_PATH=${SHADOW_DEVICES_PATH:-data/shadow-devices.json}
+      - SHADOW_DEVICE_JOBS_PATH=${SHADOW_DEVICE_JOBS_PATH:-data/shadow-device-jobs.json}
+      - SHADOW_DISCORD_STORE_PATH=${SHADOW_DISCORD_STORE_PATH:-data/shadow-discord-chats.json}
+    depends_on:
+      - shadow
+    restart: unless-stopped
+
   chromadb:
     image: docker.io/chromadb/chroma:latest
     ports:

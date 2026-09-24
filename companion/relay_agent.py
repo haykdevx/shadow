@@ -166,7 +166,18 @@ def main() -> None:
         }))
         return
 
-    config = enroll(args.server, args.enroll, args.name) if args.enroll else load_config()
+    if args.enroll:
+        try:
+            config = enroll(args.server, args.enroll, args.name)
+        except RuntimeError as exc:
+            # enroll()/_post() already turn network and server errors into a
+            # clean message (e.g. "Enrollment code is invalid or expired").
+            # Letting that propagate raw prints a full Python traceback to
+            # whoever just ran the one-line install command — not actionable
+            # for someone pasting a shell command, so surface just the text.
+            raise SystemExit(f"Shadow enrollment failed: {exc}")
+    else:
+        config = load_config()
     if args.once:
         print(f"Enrolled {config['name']} ({config['device_id']})")
         return

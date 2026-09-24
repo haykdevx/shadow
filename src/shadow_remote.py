@@ -231,6 +231,32 @@ def create_session(owner: str) -> dict[str, Any]:
     }
 
 
+def agent_config(owner: str) -> dict[str, Any]:
+    """Return what a device needs to install the remote-desktop agent itself.
+
+    The enrollment installer runs on the target machine with only its device
+    token, so it cannot open MeshCentral's invite page. This provisions the
+    account (idempotently) and hands back the device-group id that
+    MeshCentral's own agent installer and /meshsettings endpoint take,
+    scoped to the owner the device belongs to.
+    """
+    account = ensure_account(owner)
+    data = _request("/groupid", {"group": account["group"]})
+    group_id = str(data.get("group_id") or "").strip()
+    if not group_id:
+        raise ShadowRemoteError("Remote Desktop did not return a device group id")
+    prefix = _public_prefix()
+    return {
+        "group_id": group_id,
+        # Path only — the installer joins it to the server it enrolled against,
+        # so this works behind any hostname or reverse proxy.
+        "public_path": prefix,
+        "agent_settings_path": f"{prefix}meshsettings",
+        "agent_script_path": f"{prefix}meshagents?script=1",
+        "agent_binary_path": f"{prefix}meshagents",
+    }
+
+
 def list_remote_devices(owner: str) -> list[dict[str, Any]]:
     account = ensure_account(owner)
     data = _request("/devices", {
