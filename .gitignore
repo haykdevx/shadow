@@ -96,5 +96,7 @@ _scratch/
 # Self-hosted Telegram Web client (tweb) build — its assets (png/jpg/etc.) must be tracked
 !static/tweb/**
 
-# Shadow workspace-agent runtime checkpoints (never commit)
-.shadow-checkpoints/
+# Local deploy backups (never ship)
+.polish-backup/
+# Desktop app virtualenv
+desktop/.venv-desktop/

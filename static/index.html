@@ -826,6 +826,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M4 4h16v16H4z"/><path d="M8 9h8"/><path d="M8 13h5"/><path d="M8 17h3"/></svg>
           <span class="grow">Command</span>
         </div>
+        <div class="list-item" id="tool-missions-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/><path d="M6 9v6a3 3 0 0 0 3 3h3"/></svg>
+          <span class="grow">Missions</span>
+        </div>
         <div class="list-item" id="tool-browser-btn" hidden>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           <span class="grow">Browser</span>
@@ -951,6 +955,22 @@
     <h1 class="a11y-visually-hidden">Shadow</h1>
     <div class="chat-top-bar">
       <button type="button" class="incognito-indicator" id="incognito-indicator" title="Nobody mode active — click to deactivate" style="display:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
+      <div class="topbar-crumb" id="topbar-crumb"><span class="topbar-status" id="topbar-status"><i class="topbar-status-dot"></i>online</span></div>
+      <div class="topbar-cluster" id="topbar-cluster">
+        <button type="button" class="topbar-cmd" id="topbar-cmd-btn" title="Search or run a command (Ctrl+K)">
+          <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.2-3.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span class="topbar-cmd-label">Search or run a command…</span>
+          <span class="topbar-kbd">Ctrl K</span>
+        </button>
+        <button type="button" class="topbar-icon-btn" id="topbar-voice-btn" title="Talk to Shadow">
+          <svg viewBox="0 0 24 24" fill="none" width="17" height="17"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" class="topbar-icon-btn" id="topbar-bell-btn" title="Tasks & notifications">
+          <svg viewBox="0 0 24 24" fill="none" width="17" height="17"><path d="M6 8a6 6 0 1 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="topbar-bell-dot" id="topbar-bell-dot" style="display:none;"></span>
+        </button>
+        <button type="button" class="topbar-avatar" id="topbar-avatar" title="Account &amp; settings">S</button>
+      </div>
       <div class="chat-meta-overlay"><span id="current-meta">Shadow Chat</span><span id="current-meta-count" class="chat-meta-count" aria-hidden="true"></span><span id="session-cost-display" class="session-cost-display" style="display:none;"></span><span class="export-dropdown-wrap" id="export-dropdown-wrap"><button type="button" class="export-dl-btn" id="export-dl-btn" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button><div class="export-dropdown-menu" id="export-dropdown-menu"><div class="export-dropdown-item" id="export-rename-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span><span>Rename</span></div><div class="export-dropdown-item" id="export-copy-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span>Copy Chat</span></div><div class="export-dropdown-item" id="export-pdf-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h2a1.5 1.5 0 0 1 0 3H9z"/></svg></span><span>PDF</span></div><div class="export-dropdown-item" id="export-doc-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span>Save to Documents</span></div></div></span></div>    </div>
     <div id="welcome-screen">
       <div class="welcome-name"><img class="welcome-boat" src="/static/shadow-mark.svg" alt="">Shadow</div>
@@ -1082,13 +1102,6 @@
           <button type="button" class="input-icon-btn" title="Shell Access" id="bash-toggle-btn" data-mode-tool="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-            </svg>
-          </button>
-          <!-- Computer access: lets the AI read/write files, run commands, and
-               use git on an authorized folder on one of your devices. -->
-          <button type="button" class="input-icon-btn" title="Computer access" id="computer-toggle-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
             </svg>
           </button>
           <!-- RAG toolbar indicator (hidden until active) -->
@@ -2175,33 +2188,6 @@
             </div>
             <div id="adm-backupMsg" style="margin-top:6px;"></div>
           </div>
-          <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Computer Access Audit Log</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Every file, command, and agent action taken through Computer access. Admins see every account; other users see only their own.</div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
-              <select id="adm-auditFilter" style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:12px;">
-                <option value="">All events</option>
-                <option value="action_executed">Actions executed</option>
-                <option value="action_denied">Actions denied</option>
-                <option value="workspace_authorized">Folders authorized</option>
-                <option value="workspace_mode_changed">Permission mode changed</option>
-                <option value="workspace_revoked">Folders revoked</option>
-                <option value="full_access_armed">Full access armed</option>
-                <option value="full_access_disarmed">Full access disarmed</option>
-                <option value="full_access_denied">Full access denied</option>
-                <option value="agent_session_created">Agent sessions started</option>
-                <option value="agent_session_finished">Agent sessions finished</option>
-                <option value="agent_session_stopped">Agent sessions stopped</option>
-                <option value="agent_session_rollback">Agent rollbacks</option>
-              </select>
-              <button class="admin-btn-sm" id="adm-auditRefresh">Refresh</button>
-            </div>
-            <div id="adm-auditList" class="admin-user-list"><div class="admin-empty">Loading...</div></div>
-            <div style="text-align:center;margin-top:8px;">
-              <button class="admin-btn-sm" id="adm-auditLoadMore" hidden>Load more</button>
-            </div>
-          </div>
-
           <div class="admin-card admin-danger-card">
             <h2 style="color:#e55;">Danger Zone</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Irreversible. Each wipe targets one category — pick exactly what you want gone.</div>
@@ -2290,7 +2276,40 @@
   <!-- Toast container (aria-live for screen readers) -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-
+  <!-- Voice overlay — "Talk to Shadow" particle-cloud HUD (opened from the
+       top-bar mic). Wired to the real on-device STT/TTS in voiceMode.js. -->
+  <div class="voice-veil" id="voice-veil" aria-hidden="true">
+    <canvas id="voice-canvas"></canvas>
+    <div class="voice-frame">
+      <div class="voice-top">
+        <div class="voice-kicker">Shadow — Voice</div>
+        <div class="voice-clock" id="voice-clock">00:00:00</div>
+        <button class="voice-close" id="voice-close" title="Close (Esc)"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="voice-mid">
+        <div class="voice-panel">
+          <div class="voice-panel-lbl">Local stack</div>
+          <div class="voice-stat"><div class="k">Listening</div><div class="v" id="voice-stt-model">faster-whisper</div></div>
+          <div class="voice-stat"><div class="k">Speaking</div><div class="v" id="voice-tts-model">Kokoro-82M</div></div>
+          <div class="voice-stat"><div class="k">Runs on</div><div class="v accent">this device — not the cloud</div></div>
+          <div class="voice-panel-lbl">Session</div>
+          <div class="voice-stat"><div class="k">Turns</div><div class="v" id="voice-turns">0</div></div>
+        </div>
+        <div class="voice-center">
+          <div class="voice-state" id="voice-state-lbl">Idle</div>
+          <div class="voice-live-line dim" id="voice-live-line">Tap the mic and talk to Shadow.</div>
+        </div>
+        <div class="voice-panel">
+          <div class="voice-panel-lbl">Transcript</div>
+          <div id="voice-transcript"></div>
+        </div>
+      </div>
+      <div class="voice-bottom">
+        <button class="voice-mic" id="voice-mic" title="Click to talk"><svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+        <div class="voice-hint">Click to talk · <b>esc</b> to close</div>
+      </div>
+    </div>
+  </div>
 
 <!-- Load modules in this order -->
 <script type="module" src="/static/js/storage.js"></script>
@@ -2327,6 +2346,8 @@
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
+<script type="module" src="/static/js/voiceMode.js"></script>
+<script type="module" src="/static/js/commandPalette.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>
 </html>

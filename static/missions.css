@@ -1,4 +1,4 @@
-/* Desktop workspace agent and in-chat Computer mode. */
+/* Autonomous Missions + Desktop Workspace page (scoped under .missions-page) */
 .missions-page{position:fixed;inset:0;z-index:60;background:var(--color-bg,#0a0c10);color:var(--color-fg,#dbe3ee);overflow:auto}
 .missions-inner{max-width:1500px;margin:0 auto;padding:18px 22px 60px}
 .missions-top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}
@@ -138,34 +138,3 @@
 .missions-session-grid .missions-events{max-height:420px;overflow:auto}
 .missions-terminal-block h5{margin:8px 0 4px;font:11.5px ui-monospace,monospace;text-transform:none;letter-spacing:0;opacity:.85;word-break:break-all}
 body.missions-page-open{overflow:hidden}
-
-/* ── Computer mode (in-chat Direct Agent Session) ──────────────────── */
-
-.missions-badge[data-kind="rolled_back"]{color:#9ecbff;border-color:rgba(110,168,254,.4)}
-.missions-badge[data-kind="queued"]{opacity:.6}
-.missions-badge[data-kind="read_only"]{color:#9ecbff;border-color:rgba(110,168,254,.4)}
-.missions-phase{opacity:.65;font-style:italic}
-
-.computer-mode-popover{position:fixed;z-index:150;width:320px;max-width:calc(100vw - 16px);background:var(--color-bg,#0a0c10);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:14px;box-shadow:0 12px 32px rgba(0,0,0,.45);color:var(--color-fg,#dbe3ee);font-size:13px}
-.computer-mode-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.computer-mode-head strong{font-size:13.5px}
-.computer-mode-close{background:none;border:none;color:inherit;opacity:.6;cursor:pointer;font-size:14px;padding:2px 4px;border-radius:6px}
-.computer-mode-close:hover{opacity:1;background:rgba(255,255,255,.08)}
-.computer-mode-hint{margin:0 0 10px;opacity:.65;font-size:12px;line-height:1.45}
-.computer-mode-field{display:block;font-size:12px;opacity:.8;margin-bottom:10px}
-.computer-mode-field select{display:block;width:100%;box-sizing:border-box;margin-top:4px;background:rgba(0,0,0,.3);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:7px;font-size:12.5px}
-.computer-mode-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.computer-mode-always-on{margin-top:8px;font-size:12px;opacity:.75;line-height:1.45}
-.computer-mode-always-on code{opacity:.9}
-.computer-mode-empty{margin-top:8px;opacity:.55;font-size:12px}
-
-.computer-mode-role{color:#9ecbff}
-.computer-mode-body{display:flex;flex-direction:column;gap:8px}
-.computer-mode-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.computer-mode-status small{opacity:.6}
-.computer-mode-section{font-size:12.5px;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:6px 10px}
-.computer-mode-section summary{cursor:pointer;opacity:.8;font-size:12px;padding:4px 0}
-.computer-mode-section[open] summary{margin-bottom:4px}
-.computer-mode-files small{opacity:.6;display:block;margin-bottom:4px}
-.computer-mode-report{margin-top:2px}
-.computer-mode-error{border:1px solid rgba(255,99,99,.5);background:rgba(255,99,99,.06);border-radius:10px;padding:9px 11px;font-size:12.5px;color:#ff9c9c}

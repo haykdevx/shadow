@@ -61,7 +61,7 @@ function Install-ShadowStartup {
 
 function Update-ShadowAgent {
   param([Parameter(Mandatory = $true)][string]$BaseUrl)
-  if ($BaseUrl -notmatch "^https://" -and $BaseUrl -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?$") {
+  if ($BaseUrl -notmatch "^https://" -and $BaseUrl -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?/?$") {
     throw "Shadow server must use HTTPS (HTTP is allowed only for localhost)."
   }
   $Curl = Join-Path $env:SystemRoot "System32\curl.exe"
@@ -84,6 +84,83 @@ function Update-ShadowAgent {
     Move-Item -LiteralPath $TempAgent -Destination $Agent -Force
   } finally {
     Remove-Item -LiteralPath $TempGzip, $TempAgent -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Test-ShadowAdmin {
+  try {
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
+    return $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch { return $false }
+}
+
+function Install-ShadowRemoteDesktop {
+  param(
+    [Parameter(Mandatory = $true)][string]$BaseUrl,
+    [string]$Token = ""
+  )
+  if (-not $Token) { return }
+  $Curl = Join-Path $env:SystemRoot "System32\curl.exe"
+  if (-not (Test-Path -LiteralPath $Curl -PathType Leaf)) { return }
+
+  $ConfigFile = Join-Path $env:TEMP ("shadow-remote-" + [Guid]::NewGuid().ToString("N") + ".json")
+  try {
+    $Out = @(& $Curl "--silent" "--show-error" "--fail" "--location" "--connect-timeout" "15" "--max-time" "60" `
+      "--header" "Authorization: Bearer $Token" "--output" $ConfigFile `
+      ($BaseUrl.TrimEnd("/") + "/api/shadow/device/remote-config") 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "Remote Desktop: server did not answer; skipping (device agent is fine)."
+      return
+    }
+    $Cfg = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $Cfg.configured) {
+      Write-Host "Remote Desktop is not enabled on this Shadow server - skipping."
+      return
+    }
+    $MeshId = [string]$Cfg.group_id
+    if (-not $MeshId) { Write-Host "Remote Desktop: no device group returned; skipping."; return }
+    $MeshPath = [string]$Cfg.public_path
+    if (-not $MeshPath) { $MeshPath = "/remote/" }
+    $MeshBase = $BaseUrl.TrimEnd("/") + $MeshPath.TrimEnd("/")
+
+    # MeshCentral embeds the group settings into the .exe when meshid is
+    # supplied, so the downloaded agent needs no side-car config file.
+    $AgentUrl = $MeshBase + "/meshagents?id=4&meshid=" + [Uri]::EscapeDataString($MeshId) + "&installflags=0"
+
+    if (-not (Test-ShadowAdmin)) {
+      Write-Host ""
+      Write-Host "Remote Desktop needs an elevated prompt to install its service."
+      Write-Host "The Shadow device agent is installed and running. To finish Remote Desktop,"
+      Write-Host "open PowerShell as Administrator and run:"
+      Write-Host ""
+      Write-Host "  curl.exe -L -o `"$env:TEMP\meshagent64.exe`" `"$AgentUrl`"; & `"$env:TEMP\meshagent64.exe`" -fullinstall"
+      Write-Host ""
+      return
+    }
+
+    $AgentExe = Join-Path $env:TEMP "meshagent64.exe"
+    $Out = @(& $Curl "--silent" "--show-error" "--fail" "--location" "--connect-timeout" "15" "--max-time" "300" `
+      "--output" $AgentExe $AgentUrl 2>&1)
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $AgentExe -PathType Leaf)) {
+      Write-Host "Remote Desktop: could not download the agent; skipping."
+      return
+    }
+    if ((Get-Item -LiteralPath $AgentExe).Length -lt 100000) {
+      Write-Host "Remote Desktop: agent download looks truncated; skipping."
+      return
+    }
+    $Proc = Start-Process -FilePath $AgentExe -ArgumentList "-fullinstall" -Wait -PassThru -WindowStyle Hidden
+    if ($Proc.ExitCode -ne 0) {
+      Write-Host "Remote Desktop: the agent installer exited with $($Proc.ExitCode); skipping."
+      return
+    }
+    Write-Host "Remote Desktop installed (Windows)."
+    Write-Host "This machine will appear under Command > Remote within about a minute."
+  } catch {
+    Write-Host "Remote Desktop: setup skipped ($($_.Exception.Message))."
+  } finally {
+    Remove-Item -LiteralPath $ConfigFile -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -138,6 +215,10 @@ function Save-ShadowEnrollmentDirect {
       agent_version = "2.1.0"
     }
     [IO.File]::WriteAllText($Config, ($Saved | ConvertTo-Json -Depth 6), $Utf8)
+    # In-memory only — Remote Desktop setup below needs the raw token. It is
+    # deliberately not part of the JSON written above, which keeps the
+    # DPAPI-protected copy as the only thing that touches disk.
+    $Saved['token_plain'] = [string]$Result.token
     return $Saved
   } finally {
     Remove-Item -LiteralPath $RequestFile, $ResponseFile -Force -ErrorAction SilentlyContinue
@@ -173,7 +254,7 @@ if ($Repair) {
 if (-not $Server -or -not $Code) {
   throw "Server and Code are required. Create a fresh setup code in Shadow Command."
 }
-if ($Server -notmatch "^https://" -and $Server -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?$") {
+if ($Server -notmatch "^https://" -and $Server -notmatch "^http://(localhost|127\.0\.0\.1)(:\d+)?/?$") {
   throw "Shadow server must use HTTPS (HTTP is allowed only for localhost)."
 }
 
@@ -186,6 +267,8 @@ Write-Host "[3/4] Installing current-user startup..."
 Stop-ShadowDevice
 $InstalledWith = Install-ShadowStartup
 Write-Host "[4/4] Connected as $($Enrollment.name)."
+
+Install-ShadowRemoteDesktop $Server $Enrollment.token_plain
 
 Write-Host ""
 Write-Host "Shadow device installed and started."

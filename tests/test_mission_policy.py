@@ -6,14 +6,14 @@ import time
 
 import pytest
 
-import src.workspace_policy as policy
-from src.workspace_policy import (
+import src.mission_policy as policy
+from src.mission_policy import (
     ALLOW,
     DENY,
     REQUIRE_APPROVAL,
     ActionRequest,
     GrantStore,
-    WorkspacePolicyError,
+    MissionPolicyError,
     canonicalize_path,
     classify_command,
     classify_path,
@@ -44,15 +44,15 @@ def req(**kw):
 # ── path hygiene / cross-OS ──────────────────────────────────────────────
 
 def test_canonicalize_rejects_null_bytes():
-    with pytest.raises(WorkspacePolicyError):
+    with pytest.raises(MissionPolicyError):
         canonicalize_path("a\x00b")
-    with pytest.raises(WorkspacePolicyError):
+    with pytest.raises(MissionPolicyError):
         canonicalize_path("a%00b")
 
 
 def test_canonicalize_rejects_percent_encoding():
     for smuggle in ("..%2f..%2fetc", "%2e%2e/x", "a%5cb"):
-        with pytest.raises(WorkspacePolicyError):
+        with pytest.raises(MissionPolicyError):
             canonicalize_path(smuggle)
 
 
@@ -166,10 +166,10 @@ def test_auto_gates_dangerous_commands():
         assert decision.verdict == REQUIRE_APPROVAL, command
 
 
-def test_auto_gates_network_unless_session_approved():
+def test_auto_gates_network_unless_mission_approved():
     request = req(command="git pull origin main")
     assert evaluate(request, mode="auto").verdict == REQUIRE_APPROVAL
-    assert evaluate(request, mode="auto", network_approved=True).verdict == ALLOW
+    assert evaluate(request, mode="auto", mission_network_approved=True).verdict == ALLOW
 
 
 def test_auto_gates_secrets_paths_even_for_reads():
@@ -201,7 +201,7 @@ def test_full_mode_allows_after_arming(monkeypatch):
         def verify_password(self, username, password):
             return password == "correct"
     monkeypatch.setattr("core.auth.AuthManager", FakeAuth)
-    with pytest.raises(WorkspacePolicyError):
+    with pytest.raises(MissionPolicyError):
         policy.arm_full_access("alice", "dev1", password="wrong")
     result = policy.arm_full_access("alice", "dev1", password="correct", duration_seconds=120)
     assert result["armed"]
@@ -269,10 +269,19 @@ def test_missing_owner_denied():
 
 def test_once_grant_consumed_exactly_once():
     request = req(command="pip install requests")
-    assert evaluate(request, mode="auto", session_id="sess-a").verdict == REQUIRE_APPROVAL
+    assert evaluate(request, mode="auto", mission_id="m1").verdict == REQUIRE_APPROVAL
     policy.GRANTS.grant("alice", "once", "m1", grant_key_for(request))
-    assert evaluate(request, mode="auto", session_id="sess-a").verdict == ALLOW
-    assert evaluate(request, mode="auto", session_id="sess-a").verdict == REQUIRE_APPROVAL
+    assert evaluate(request, mode="auto", mission_id="m1").verdict == ALLOW
+    assert evaluate(request, mode="auto", mission_id="m1").verdict == REQUIRE_APPROVAL
+
+
+def test_mission_grant_covers_same_classification_repeatedly():
+    request = req(command="pip install requests")
+    policy.GRANTS.grant("alice", "mission", "m1", grant_key_for(request))
+    for _ in range(3):
+        assert evaluate(request, mode="auto", mission_id="m1").verdict == ALLOW
+    # other missions are not covered
+    assert evaluate(request, mode="auto", mission_id="m2").verdict == REQUIRE_APPROVAL
 
 
 def test_session_grant_scoped_to_session():

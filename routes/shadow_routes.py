@@ -17,7 +17,9 @@ from src.auth_helpers import require_user
 from src.shadow_access import (
     ShadowAccessError,
     access_summary,
+    create_discord_pair_code,
     create_telegram_pair_code,
+    unlink_discord,
     unlink_telegram,
 )
 from src.shadow_automation import (
@@ -54,6 +56,7 @@ from src.shadow_pc import (
     watchdog,
 )
 from src.shadow_remote import (
+    agent_config as remote_agent_config,
     ShadowRemoteError,
     create_invite as create_remote_invite,
     create_session as create_remote_session,
@@ -61,6 +64,13 @@ from src.shadow_remote import (
     status as remote_status,
 )
 from src.shadow_telegram_store import list_chats, mark_read, messages, owns_chat, record_message
+from src.shadow_discord_store import (
+    list_chats as list_discord_chats,
+    mark_read as mark_discord_read,
+    messages as discord_messages,
+    owns_chat as owns_discord_chat,
+    record_message as record_discord_message,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -120,6 +130,10 @@ class TelegramSendRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
 
+class DiscordSendRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1900)
+
+
 def _model_dump(model: BaseModel) -> dict[str, Any]:
     return model.model_dump() if hasattr(model, "model_dump") else model.dict()
 
@@ -176,6 +190,25 @@ def _telegram_send(chat_id: int, text: str) -> dict[str, Any]:
     if not payload.get("ok"):
         raise HTTPException(502, str(payload.get("description") or "Telegram rejected the message"))
     return payload.get("result") or {}
+
+
+def _discord_send(channel_id: int, text: str) -> dict[str, Any]:
+    token = os.getenv("SHADOW_DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(503, "Discord bot is not configured")
+    try:
+        response = httpx.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            headers={"Authorization": f"Bot {token}"},
+            json={"content": text[:1900]},
+            timeout=20,
+        )
+        payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(502, f"Discord send failed: {exc}") from exc
+    if response.status_code >= 300:
+        raise HTTPException(502, str(payload.get("message") or "Discord rejected the message"))
+    return payload or {}
 
 
 def setup_shadow_routes() -> APIRouter:
@@ -239,7 +272,13 @@ def setup_shadow_routes() -> APIRouter:
     @router.get("/access")
     def shadow_access(request: Request):
         user = _real_user(request)
-        return {"username": user, "devices": list_devices(user), "telegram_linked": access_summary(user).get("telegram_linked", False)}
+        summary = access_summary(user)
+        return {
+            "username": user,
+            "devices": list_devices(user),
+            "telegram_linked": summary.get("telegram_linked", False),
+            "discord_linked": summary.get("discord_linked", False),
+        }
 
     @router.post("/device/enroll")
     def shadow_device_enroll(payload: DeviceEnrollRequest):
@@ -267,6 +306,23 @@ def setup_shadow_routes() -> APIRouter:
             return complete_job(device, payload.job_id, {"result": payload.result, "error": payload.error})
         except ShadowDeviceError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/device/remote-config")
+    def shadow_device_remote_config(request: Request):
+        """Remote-desktop join details for the calling device's own account.
+
+        Authenticated by the device token issued at enrollment, so the
+        installer can finish remote-desktop setup in the same run instead of
+        making the user open an invite link on every machine.
+        """
+        device = _device_from_request(request)
+        try:
+            config = remote_agent_config(device.get("owner"))
+        except ShadowRemoteError as exc:
+            # Remote Desktop being off is not an install failure — the agent
+            # itself is already enrolled and working.
+            return {"ok": False, "configured": False, "error": str(exc)}
+        return {"ok": True, "configured": True, **config}
 
     @router.get("/device/install/{platform_name}", response_class=PlainTextResponse)
     def shadow_device_installer(platform_name: str):
@@ -344,6 +400,53 @@ def setup_shadow_routes() -> APIRouter:
             raise HTTPException(404, "Telegram chat not found")
         sent = _telegram_send(chat_id, payload.text)
         record_message(user, chat_id, "out", payload.text, telegram_message_id=sent.get("message_id"))
+        return {"ok": True, "message": sent}
+
+    @router.post("/discord/pair-code")
+    def shadow_discord_pair_code(request: Request):
+        try:
+            return create_discord_pair_code(_real_user(request))
+        except ShadowAccessError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.delete("/discord/link")
+    def shadow_discord_unlink(request: Request):
+        return unlink_discord(_real_user(request))
+
+    @router.get("/discord/status")
+    def shadow_discord_status(request: Request):
+        user = _real_user(request)
+        return {
+            "configured": bool(os.getenv("SHADOW_DISCORD_BOT_TOKEN", "").strip()),
+            "linked": bool(access_summary(user).get("discord_linked")),
+            "username": user,
+        }
+
+    @router.get("/discord/chats")
+    def shadow_discord_chats(request: Request):
+        return {"chats": list_discord_chats(_real_user(request))}
+
+    @router.get("/discord/chats/{channel_id}/messages")
+    def shadow_discord_messages(channel_id: int, request: Request, limit: int = 200):
+        user = _real_user(request)
+        if not owns_discord_chat(user, channel_id):
+            raise HTTPException(404, "Discord chat not found")
+        return {"messages": discord_messages(user, channel_id, limit)}
+
+    @router.post("/discord/chats/{channel_id}/read")
+    def shadow_discord_read(channel_id: int, request: Request):
+        user = _real_user(request)
+        if not owns_discord_chat(user, channel_id):
+            raise HTTPException(404, "Discord chat not found")
+        return mark_discord_read(user, channel_id)
+
+    @router.post("/discord/chats/{channel_id}/send")
+    def shadow_discord_send(channel_id: int, payload: DiscordSendRequest, request: Request):
+        user = _real_user(request)
+        if not owns_discord_chat(user, channel_id):
+            raise HTTPException(404, "Discord chat not found")
+        sent = _discord_send(channel_id, payload.text)
+        record_discord_message(user, channel_id, "out", payload.text, discord_message_id=int(sent["id"]) if sent.get("id") else None)
         return {"ok": True, "message": sent}
 
     @router.get("/overview")

@@ -28,7 +28,8 @@
       ],
       "passwordRequirements": {
         "loginTokens": true
-      }
+      },
+      "certUrl": "http://localhost:7000"
     }
   }
 }

@@ -38,16 +38,9 @@ Most self-hosted AI projects stop at a chat box. Shadow is built as a private **
 - The account-owned device agent connects outbound over HTTPS; it opens no home-router port. Destructive actions remain server- and device-gated behind explicit confirmation.
 - **Telegram inbox + remote** — pair one Telegram identity to one Shadow account. Bot chats appear inside Shadow and commands can control only that account's enrolled PCs.
 - **Agent browser** — a real per-account Chromium (Playwright) the agent and you share: persistent isolated profile, Command-page panel with live capture, Telegram `/browse`, optional MAGI evidence source. Risky actions (payments, sends, posts, deletes, secret-field fills, raw JS) stop server-side and wait for your explicit approval.
-- **Agent Sessions + Desktop Workspace (Computer access)** — authorize a project folder on your own PC and run a direct **Agent Session**: pick a model, type a task, and watch it inspect and edit the real files with a live activity timeline, terminal output, changed-file diffs, and follow-up messages in context. Runs under Codex-style permission modes (*Ask for approval* / *Approve for me* / persistent **Unattended** / password-armed *Full access*) enforced by a server-side policy engine (`src/workspace_policy.py`) and re-checked by the device agent. Computer access is opt-in per account (`can_use_computer`); every action is written to an append-only audit log viewable in Settings → System. Checkpoints before any edit; one-click rollback. See [SECURITY.md](SECURITY.md) for the policy and threat model.
+- **Agent Sessions + Autonomous Missions + Desktop Workspace** — authorize a project folder on your own PC and either run a direct **Agent Session** (pick a model, type a task, watch it inspect and edit the real files with a live activity timeline, terminal output, changed-file diffs, and follow-up messages in context) or a multi-stage **Mission** (planned task DAG across planner/researcher/implementer/reviewer/tester roles). Both run under Codex-style permission modes (*Ask for approval* / *Approve for me* / persistent **Unattended** / password-armed *Full access*) enforced by a server-side policy engine and re-checked by the device agent. Checkpoints before any edit; one-click rollback. See [AUTONOMOUS_MISSIONS.md](AUTONOMOUS_MISSIONS.md).
 
 **Platform** — responsive, installable **PWA**, 2FA (TOTP), scoped API tokens, and a public-safe **demo mode** (`SHADOW_DEMO_MODE=true`).
-
-<p align="center">
-  <img src="docs/computer-access.png" alt="Computer access — authorize a folder on your own PC and run agent sessions under a permission mode" width="48%">
-  &nbsp;
-  <img src="docs/computer-access-audit.png" alt="Computer Access Audit Log in Settings → System — every file, command, and agent action, owner-scoped" width="48%">
-</p>
-<p align="center"><sub><b>Computer access:</b> authorize a folder and run agent sessions on your own machine (left) · every action lands in an append-only audit log in Settings → System (right).</sub></p>
 
 ---
 

@@ -17,6 +17,23 @@ if (KEY.length < 32 || ADMIN_PASS.length < 24) {
   process.exit(1);
 }
 
+// MeshCentral runs on a named domain (the last path segment of MESH_URL,
+// e.g. wss://meshcentral:443/remote -> "remote"). Several meshctrl commands
+// silently do nothing when handed a bare user name on such a server.
+const MESH_DOMAIN = (() => {
+  try {
+    const path = new URL(MESH_URL.replace(/^ws/, 'http')).pathname || '';
+    return path.replace(/^\/+|\/+$/g, '').split('/')[0] || '';
+  } catch (_) {
+    return '';
+  }
+})();
+
+function qualifiedUserId(username) {
+  if (String(username).startsWith('user/')) return String(username);
+  return MESH_DOMAIN ? `user/${MESH_DOMAIN}/${username}` : String(username);
+}
+
 function validName(value, max = 80) {
   return typeof value === 'string' && value.length >= 3 && value.length <= max && /^[A-Za-z0-9_. -]+$/.test(value);
 }
@@ -94,7 +111,9 @@ function meshctrl(command, args = [], credentials = null, timeoutMs = 30000) {
       const output = stdout.trim();
       const errorText = stderr.trim();
       const combined = `${output}\n${errorText}`;
-      if (code !== 0 || /invalid login|authentication token required|url key is invalid|server disconnected/i.test(combined)) {
+      // "Nothing done" / "Mismatch domains" come back with exit code 0, so
+      // without this a failed grant looks like success.
+      if (code !== 0 || /invalid login|authentication token required|url key is invalid|server disconnected|nothing done|mismatch domains|not found/i.test(combined)) {
         reject(new Error(errorText || output || `MeshCentral ${command} failed`));
         return;
       }
@@ -133,7 +152,7 @@ async function provision(body) {
   // `notools` site flag also disables login-token creation, so desktop-only
   // access is enforced with device-group rights below instead.
   await meshctrl('EditUser', [
-    '--userid', username,
+    '--userid', qualifiedUserId(username),
     '--rights', 'nonewgroups,locksettings',
   ]);
 
@@ -150,7 +169,7 @@ async function provision(body) {
   // confirmation-gated APIs.
   await meshctrl('AddUserToDeviceGroup', [
     '--group', group,
-    '--userid', username,
+    '--userid', qualifiedUserId(username),
     '--remotecontrol',
     '--noterminal',
     '--nofiles',
@@ -158,6 +177,22 @@ async function provision(body) {
     '--limitedevents',
   ]);
   return { ok: true };
+}
+
+// The agent installer needs the bare mesh id (no "mesh/<domain>/" prefix) —
+// that is what /meshsettings?id= and meshinstall.sh both take.
+async function groupId(body) {
+  const group = String(body.group || '');
+  if (!validName(group, 100)) throw new Error('Invalid device group');
+  const raw = (await meshctrl('ListDeviceGroups', ['--nameexists', group])).trim();
+  if (!raw) throw new Error('Device group does not exist');
+  const line = raw.split(/\r?\n/).map((v) => v.trim()).filter(Boolean).pop() || '';
+  // meshctrl returns the full id, e.g. "mesh/remote/AbC...@" — strip the
+  // domain prefix, leaving the token the agent endpoints expect.
+  const parts = line.split('/');
+  const meshId = parts.length >= 3 ? parts.slice(2).join('/') : line;
+  if (!meshId) throw new Error('MeshCentral did not return a device group id');
+  return { ok: true, group_id: meshId, full_id: line };
 }
 
 async function invite(body) {
@@ -215,6 +250,7 @@ const server = http.createServer(async (req, res) => {
     let result;
     if (req.url === '/provision') result = await provision(body);
     else if (req.url === '/invite') result = await invite(body);
+    else if (req.url === '/groupid') result = await groupId(body);
     else if (req.url === '/session') result = await session(body);
     else if (req.url === '/devices') result = await devices(body);
     else {

@@ -82,6 +82,17 @@ export function initSidebarLayout(Storage, opts) {
   if (Storage.get(Storage.KEYS.SIDEBAR_SIDE) === 'right') {
     document.getElementById('sidebar').classList.add('right-side');
   }
+  // Restore expanded-vs-rail-only preference. Unset (nothing saved yet, i.e.
+  // every session before this shipped) defaults to rail-only — the compact,
+  // icon-first resting state — so the app opens the way it's meant to look
+  // rather than always landing on the full text sidebar. Mobile handles its
+  // own layout below (auto-collapse + overlay), so this only applies at
+  // desktop widths.
+  if (window.innerWidth >= 768) {
+    const railOnlyPref = Storage.get(Storage.KEYS.SIDEBAR_RAIL_ONLY);
+    const wantRailOnly = railOnlyPref === null ? true : railOnlyPref === '1';
+    if (wantRailOnly) document.getElementById('sidebar').classList.add('hidden');
+  }
   syncRailSide();
 
   // In-sidebar toggle button — same behavior as hamburger
@@ -189,13 +200,17 @@ export function initSidebarLayout(Storage, opts) {
         return;
       }
 
-      // Desktop: full sidebar ↔ mini (icon rail) — simple toggle
+      // Desktop: full sidebar ↔ mini (icon rail) — simple toggle. This is a
+      // deliberate user choice, so persist it — unlike the width-driven
+      // auto-collapse below, which is reactive and shouldn't overwrite it.
       if (isSidebarVisible) {
         sidebar.classList.add('hidden');
+        Storage.set(Storage.KEYS.SIDEBAR_RAIL_ONLY, '1');
       } else {
         _wasAutoCollapsed = false;
         iconRail.classList.remove('rail-hidden');
         sidebar.classList.remove('hidden');
+        Storage.set(Storage.KEYS.SIDEBAR_RAIL_ONLY, '0');
       }
       syncRailSide();
     });

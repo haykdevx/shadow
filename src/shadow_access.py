@@ -59,7 +59,9 @@ def _default_state() -> dict[str, Any]:
         "grants": {},
         "requests": {},
         "telegram": {},
+        "discord": {},
         "pair_codes": {},
+        "discord_pair_codes": {},
     }
 
 
@@ -70,11 +72,11 @@ def _load() -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError, TypeError):
         raw = {}
     if isinstance(raw, dict):
-        for key in ("owner", "grants", "requests", "telegram", "pair_codes"):
+        for key in ("owner", "grants", "requests", "telegram", "discord", "pair_codes", "discord_pair_codes"):
             if key in raw:
                 state[key] = raw[key]
     state["owner"] = _username(state.get("owner") or os.getenv("SHADOW_PC_OWNER"))
-    for key in ("grants", "requests", "telegram", "pair_codes"):
+    for key in ("grants", "requests", "telegram", "discord", "pair_codes", "discord_pair_codes"):
         if not isinstance(state.get(key), dict):
             state[key] = {}
     _purge_pair_codes(state)
@@ -91,6 +93,11 @@ def _purge_pair_codes(state: dict[str, Any]) -> None:
     state["pair_codes"] = {
         code: row
         for code, row in (state.get("pair_codes") or {}).items()
+        if isinstance(row, dict) and float(row.get("expires_at") or 0) > now
+    }
+    state["discord_pair_codes"] = {
+        code: row
+        for code, row in (state.get("discord_pair_codes") or {}).items()
         if isinstance(row, dict) and float(row.get("expires_at") or 0) > now
     }
 
@@ -156,6 +163,11 @@ def access_summary(username: str) -> dict[str, Any]:
             for row in state["telegram"].values()
             if isinstance(row, dict)
         ),
+        "discord_linked": any(
+            _username(row.get("username")) == username
+            for row in state["discord"].values()
+            if isinstance(row, dict)
+        ),
     }
     if perms["owner"]:
         result["owner"] = state["owner"]
@@ -172,6 +184,11 @@ def access_summary(username: str) -> dict[str, Any]:
         result["telegram"] = [
             {"telegram_user_id": key, **row}
             for key, row in sorted(state["telegram"].items())
+            if isinstance(row, dict)
+        ]
+        result["discord"] = [
+            {"discord_user_id": key, **row}
+            for key, row in sorted(state["discord"].items())
             if isinstance(row, dict)
         ]
     return result
@@ -231,6 +248,11 @@ def revoke_access(owner: str, username: str) -> dict[str, Any]:
         state["telegram"] = {
             key: row
             for key, row in state["telegram"].items()
+            if _username((row or {}).get("username")) != username
+        }
+        state["discord"] = {
+            key: row
+            for key, row in state["discord"].items()
             if _username((row or {}).get("username")) != username
         }
         _save(state)
@@ -313,6 +335,88 @@ def unlink_telegram(username: str, telegram_user_id: int | None = None) -> dict[
             if not (
                 _username((row or {}).get("username")) == username
                 and (telegram_user_id is None or key == str(int(telegram_user_id)))
+            )
+        }
+        _save(state)
+    return {"ok": True}
+
+
+def create_discord_pair_code(username: str) -> dict[str, Any]:
+    username = _username(username)
+    if not username:
+        raise ShadowAccessError("A real Shadow account is required")
+    code = "-".join([
+        secrets.token_hex(2).upper(),
+        secrets.token_hex(2).upper(),
+        secrets.token_hex(2).upper(),
+    ])
+    now = time.time()
+    with _LOCK, _file_lock():
+        state = _load()
+        state["discord_pair_codes"][code] = {
+            "username": username,
+            "created_at": now,
+            "expires_at": now + PAIR_TTL_SECONDS,
+        }
+        _save(state)
+    return {"code": code, "expires_at": now + PAIR_TTL_SECONDS}
+
+
+def consume_discord_pair_code(code: str, discord_user_id: int, channel_id: int) -> dict[str, Any]:
+    code = str(code or "").strip().upper()
+    key = str(int(discord_user_id))
+    with _LOCK, _file_lock():
+        state = _load()
+        row = state["discord_pair_codes"].pop(code, None)
+        if not row:
+            raise ShadowAccessError("Pairing code is invalid or expired")
+        username = _username(row.get("username"))
+        if not username:
+            raise ShadowAccessError("Pairing code has no account owner")
+        state["discord"] = {
+            existing_key: existing
+            for existing_key, existing in state["discord"].items()
+            if _username((existing or {}).get("username")) != username and existing_key != key
+        }
+        state["discord"][key] = {
+            "username": username,
+            "channel_id": int(channel_id),
+            "paired_at": time.time(),
+        }
+        _save(state)
+    return {"username": username}
+
+
+def discord_identity(discord_user_id: int) -> dict[str, Any] | None:
+    with _LOCK:
+        state = _load()
+    row = state["discord"].get(str(int(discord_user_id)))
+    if not isinstance(row, dict):
+        return None
+    username = _username(row.get("username"))
+    return {"username": username, **row}
+
+
+def discord_identity_for_chat(channel_id: int) -> dict[str, Any] | None:
+    with _LOCK:
+        state = _load()
+    for row in state["discord"].values():
+        if isinstance(row, dict) and int(row.get("channel_id") or 0) == int(channel_id):
+            username = _username(row.get("username"))
+            return {"username": username, **row}
+    return None
+
+
+def unlink_discord(username: str, discord_user_id: int | None = None) -> dict[str, Any]:
+    username = _username(username)
+    with _LOCK, _file_lock():
+        state = _load()
+        state["discord"] = {
+            key: row
+            for key, row in state["discord"].items()
+            if not (
+                _username((row or {}).get("username")) == username
+                and (discord_user_id is None or key == str(int(discord_user_id)))
             )
         }
         _save(state)

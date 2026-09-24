@@ -22,7 +22,7 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import commandPageModule from './js/commandPage.js';
-import computerModeModule from './js/computerMode.js';
+import missionsPageModule from './js/missionsPage.js';
 import telegramModule from './js/telegram.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
@@ -217,8 +217,10 @@ function initializeEventListeners() {
       // like every other page instead of needing the X button.
       const opensTelegram = e.target.closest('#tool-telegram-btn, #rail-telegram');
       const opensCommand = e.target.closest('#tool-command-btn, #rail-command');
+      const opensMissions = e.target.closest('#tool-missions-btn');
       try { if (!opensTelegram) telegramModule?.closePage?.(); } catch (_) {}
       try { if (!opensCommand) commandPageModule?.closePage?.(); } catch (_) {}
+      try { if (!opensMissions) missionsPageModule?.closePage?.(); } catch (_) {}
     }
   });
 
@@ -1016,6 +1018,7 @@ function initializeEventListeners() {
     },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
     '/command':  () => commandPageModule && commandPageModule.openPage({ push: false }),
+    '/missions': () => missionsPageModule && missionsPageModule.openPage({ push: false }),
     '/telegram': () => telegramModule && telegramModule.openPage({ push: false }),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
@@ -3461,6 +3464,81 @@ function startShadowApp() {
     });
   }
 
+  // ── Command Center top bar ──
+  // The persistent top bar's controls delegate to the app's existing
+  // machinery rather than reimplementing anything: the command pill opens
+  // the same search/command palette as Ctrl+K; the mic drives the input
+  // bar's own voice button (so STT/attach behavior is identical); the bell
+  // opens Tasks (which owns notifications); the avatar opens Settings.
+  const topbarCmdBtn = el('topbar-cmd-btn');
+  if (topbarCmdBtn) {
+    topbarCmdBtn.addEventListener('click', () => {
+      if (searchChatModule) searchChatModule.openSearch();
+    });
+  }
+  const topbarVoiceBtn = el('topbar-voice-btn');
+  if (topbarVoiceBtn) {
+    topbarVoiceBtn.addEventListener('click', () => {
+      // Open the full "Talk to Shadow" voice overlay (voiceMode.js). It owns
+      // the real mic → STT → chat → TTS loop. Fall back to the input bar's
+      // own mic control if the overlay module hasn't loaded for some reason.
+      if (window.shadowVoice && typeof window.shadowVoice.open === 'function') {
+        window.shadowVoice.open();
+        return;
+      }
+      const micBtn = document.querySelector('.send-btn.mic-mode');
+      if (micBtn) micBtn.click();
+      else { const inp = el('message'); if (inp) inp.focus(); }
+    });
+  }
+  const topbarBellBtn = el('topbar-bell-btn');
+  if (topbarBellBtn) {
+    topbarBellBtn.addEventListener('click', () => {
+      const tasksBtn = el('tool-tasks-btn');
+      if (tasksBtn) tasksBtn.click();
+    });
+  }
+  const topbarAvatar = el('topbar-avatar');
+  if (topbarAvatar) {
+    topbarAvatar.addEventListener('click', () => {
+      const settingsBtn = el('user-bar-settings') || el('rail-settings');
+      if (settingsBtn) settingsBtn.click();
+    });
+    // Seed the avatar initial from the signed-in user's name once it's known.
+    // Also publish it as --user-initial so chat message avatars (CSS ::after)
+    // show the user's letter instead of a placeholder.
+    const _seedAvatar = () => {
+      const nameEl = el('user-bar-name');
+      const name = (nameEl && nameEl.textContent || '').trim();
+      if (name && name !== 'User') {
+        const letter = name.charAt(0).toUpperCase();
+        topbarAvatar.textContent = letter;
+        // CSS `content` needs a quoted string token, e.g. "H".
+        document.documentElement.style.setProperty('--user-initial', JSON.stringify(letter));
+        return true;
+      }
+      return false;
+    };
+    if (!_seedAvatar()) {
+      const _nameEl = el('user-bar-name');
+      if (_nameEl) {
+        const _obs = new MutationObserver(() => { if (_seedAvatar()) _obs.disconnect(); });
+        _obs.observe(_nameEl, { childList: true, characterData: true, subtree: true });
+      }
+    }
+  }
+  // Keep the top-bar notification dot in sync with the Tasks sidebar dot.
+  const _assistantDot = el('assistant-notif-dot');
+  const _topbarBellDot = el('topbar-bell-dot');
+  if (_assistantDot && _topbarBellDot) {
+    const _syncBellDot = () => {
+      const on = getComputedStyle(_assistantDot).display !== 'none';
+      _topbarBellDot.style.display = on ? '' : 'none';
+    };
+    _syncBellDot();
+    new MutationObserver(_syncBellDot).observe(_assistantDot, { attributes: true, attributeFilter: ['style', 'class'] });
+  }
+
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
     'rail-compare':   'tool-compare-btn',
@@ -4000,8 +4078,7 @@ function startShadowApp() {
   // Ensure proper initial state
   voiceRecorderModule.init();
   commandPageModule.init();
-  computerModeModule.init();
-  computerModeModule.attachToggle(el('computer-toggle-btn'));
+  missionsPageModule.init();
   telegramModule.init();
   if (censorModule) censorModule.init();
 

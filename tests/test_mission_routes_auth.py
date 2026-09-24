@@ -1,4 +1,4 @@
-"""Workspace-agent routes: only interactive cookie sessions may use them.
+"""Mission/workspace routes: only interactive cookie sessions may use them.
 
 API tokens, the internal agent bridge, and anonymous callers must all be
 rejected — an agent must never be able to approve its own gated action,
@@ -10,9 +10,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
-import src.workspace_policy as policy
-import src.workspace_service as workspaces
-from src.workspace_policy import GrantStore
+import src.mission_policy as policy
+import src.mission_workspaces as workspaces
+from src.mission_policy import GrantStore
 
 
 class _AuthStub(BaseHTTPMiddleware):
@@ -35,29 +35,33 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(workspaces, "DATA_DIR", tmp_path)
     monkeypatch.setattr(workspaces, "WORKSPACES_PATH", tmp_path / "ws.json")
 
-    from routes.workspace_agent_routes import setup_workspace_agent_routes
+    from routes.mission_routes import setup_mission_routes
     app = FastAPI()
     app.add_middleware(_AuthStub)
 
     class _ConfiguredAuth:
         is_configured = True
     app.state.auth_manager = _ConfiguredAuth()
-    app.include_router(setup_workspace_agent_routes())
+    app.include_router(setup_mission_routes())
     return TestClient(app, raise_server_exceptions=False)
 
 
 PROTECTED = [
-    ("GET", "/api/workspace-agent/workspaces", None),
-    ("POST", "/api/workspace-agent/workspaces", {"device_id": "dev1", "root": "/x"}),
-    ("GET", "/api/workspace-agent/policy/rules", None),
-    ("POST", "/api/workspace-agent/policy/full-access", {"device_id": "dev1", "password": "x"}),
-    ("POST", "/api/workspace-agent/workspaces/wsid1234/action", {"action": "ws_read", "args": {}}),
-    ("GET", "/api/workspace-agent/sessions", None),
-    ("POST", "/api/workspace-agent/sessions",
+    ("GET", "/api/missions/workspaces", None),
+    ("POST", "/api/missions/workspaces", {"device_id": "dev1", "root": "/x"}),
+    ("GET", "/api/missions", None),
+    ("POST", "/api/missions", {"workspace_id": "w" * 8, "goal": "do something useful"}),
+    ("GET", "/api/missions/policy/rules", None),
+    ("POST", "/api/missions/policy/full-access", {"device_id": "dev1", "password": "x"}),
+    ("POST", "/api/missions/abcdef1234/approvals/ap1", {"decision": "allow_once"}),
+    ("POST", "/api/missions/abcdef1234/start", None),
+    ("POST", "/api/missions/workspaces/wsid1234/action", {"action": "ws_read", "args": {}}),
+    ("GET", "/api/missions/sessions", None),
+    ("POST", "/api/missions/sessions",
      {"workspace_id": "w" * 8, "task": "do something", "endpoint_id": "ep1", "model": "m"}),
-    ("POST", "/api/workspace-agent/sessions/abcdef1234/stop", None),
-    ("POST", "/api/workspace-agent/sessions/abcdef1234/message", {"text": "hello"}),
-    ("POST", "/api/workspace-agent/sessions/abcdef1234/approvals/ap1", {"decision": "allow_once"}),
+    ("POST", "/api/missions/sessions/abcdef1234/stop", None),
+    ("POST", "/api/missions/sessions/abcdef1234/message", {"text": "hello"}),
+    ("POST", "/api/missions/sessions/abcdef1234/approvals/ap1", {"decision": "allow_once"}),
 ]
 
 
@@ -76,17 +80,28 @@ def test_api_token_rejected(client, method, path, body):
 
 @pytest.mark.parametrize("identity", ["api", "internal-tool"])
 def test_agent_bridge_identities_rejected(client, identity):
-    response = client.post("/api/workspace-agent/sessions/abcdef1234/approvals/ap1",
+    response = client.post("/api/missions/abcdef1234/approvals/ap1",
                            json={"decision": "allow_once"},
                            headers={"x-test-user": identity})
     assert response.status_code == 403
 
 
 def test_interactive_user_passes_auth_layer(client):
-    response = client.get("/api/workspace-agent/workspaces", headers={"x-test-user": "alice"})
+    response = client.get("/api/missions/workspaces", headers={"x-test-user": "alice"})
     assert response.status_code == 200
     assert response.json() == {"workspaces": []}
 
+
+def test_cross_user_mission_access_404(client, tmp_path, monkeypatch):
+    import src.mission_engine as engine
+    monkeypatch.setattr(engine, "MISSIONS_DIR", tmp_path / "missions")
+    monkeypatch.setattr("src.shadow_devices.get_device",
+                        lambda owner, device_id=None: {"id": "dev1", "name": "PC", "online": True})
+    ws = workspaces.create_workspace("alice", "dev1", "/home/alice/p")
+    mission = engine.create_mission("alice", ws["id"], "long enough goal here",
+                                    roles={"planner": {"endpoint_id": "e", "model": "m"}})
+    response = client.get(f"/api/missions/{mission['id']}", headers={"x-test-user": "bob"})
+    assert response.status_code == 404
 
 
 def test_full_access_requires_password(client, monkeypatch):
@@ -94,19 +109,19 @@ def test_full_access_requires_password(client, monkeypatch):
         def verify_password(self, username, password):
             return password == "right"
     monkeypatch.setattr("core.auth.AuthManager", FakeAuth)
-    bad = client.post("/api/workspace-agent/policy/full-access",
+    bad = client.post("/api/missions/policy/full-access",
                       json={"device_id": "dev1", "password": "wrong"},
                       headers={"x-test-user": "alice"})
     assert bad.status_code == 403
-    good = client.post("/api/workspace-agent/policy/full-access",
+    good = client.post("/api/missions/policy/full-access",
                        json={"device_id": "dev1", "password": "right"},
                        headers={"x-test-user": "alice"})
     assert good.status_code == 200 and good.json()["armed"]
-    status = client.get("/api/workspace-agent/policy/full-access/dev1",
+    status = client.get("/api/missions/policy/full-access/dev1",
                         headers={"x-test-user": "alice"})
     assert status.json()["armed"] is True
     # another user does not see or share the armed state
-    other = client.get("/api/workspace-agent/policy/full-access/dev1",
+    other = client.get("/api/missions/policy/full-access/dev1",
                        headers={"x-test-user": "bob"})
     assert other.json()["armed"] is False
 
@@ -114,10 +129,10 @@ def test_full_access_requires_password(client, monkeypatch):
 def test_workspace_full_mode_requires_armed_full_access(client, monkeypatch):
     monkeypatch.setattr("src.shadow_devices.get_device",
                         lambda owner, device_id=None: {"id": "dev1", "name": "PC", "online": True})
-    ws = client.post("/api/workspace-agent/workspaces",
+    ws = client.post("/api/missions/workspaces",
                      json={"device_id": "dev1", "root": "/home/alice/p"},
                      headers={"x-test-user": "alice"}).json()
-    response = client.put(f"/api/workspace-agent/workspaces/{ws['id']}/mode",
+    response = client.put(f"/api/missions/workspaces/{ws['id']}/mode",
                           json={"mode": "full"}, headers={"x-test-user": "alice"})
     assert response.status_code == 403
     assert "Arm full access" in response.json()["detail"]
@@ -126,11 +141,11 @@ def test_workspace_full_mode_requires_armed_full_access(client, monkeypatch):
 def test_persistent_rules_owner_scoped(client):
     policy.GRANTS.grant("alice", "workspace", "", "shell:pip-install",
                         workspace_id="ws1", summary="installer")
-    mine = client.get("/api/workspace-agent/policy/rules", headers={"x-test-user": "alice"}).json()
+    mine = client.get("/api/missions/policy/rules", headers={"x-test-user": "alice"}).json()
     assert len(mine["rules"]) == 1
-    theirs = client.get("/api/workspace-agent/policy/rules", headers={"x-test-user": "bob"}).json()
+    theirs = client.get("/api/missions/policy/rules", headers={"x-test-user": "bob"}).json()
     assert theirs["rules"] == []
     rule_id = mine["rules"][0]["id"]
-    stolen = client.delete(f"/api/workspace-agent/policy/rules/{rule_id}",
+    stolen = client.delete(f"/api/missions/policy/rules/{rule_id}",
                            headers={"x-test-user": "bob"})
     assert stolen.status_code == 404

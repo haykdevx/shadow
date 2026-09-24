@@ -205,7 +205,10 @@ class TTSService:
 
         if provider == "local":
             kokoro = self._get_kokoro()
-            stats["model"] = "Kokoro-82M (GPU)" if (kokoro and kokoro.available) else "Kokoro (not loaded)"
+            if kokoro and kokoro.available:
+                stats["model"] = f"Kokoro-82M ({'GPU' if kokoro.device.type == 'cuda' else 'CPU'})"
+            else:
+                stats["model"] = "Kokoro (not loaded)"
         elif provider == "browser":
             stats["model"] = "Browser (Web Speech API)"
         elif provider.startswith("endpoint:"):
@@ -215,7 +218,14 @@ class TTSService:
 
 
 class _KokoroPipeline:
-    """Encapsulates the Kokoro-82M local GPU pipeline."""
+    """Encapsulates the Kokoro-82M local TTS pipeline.
+
+    GPU when available, CPU otherwise. Kokoro-82M is small enough for CPU
+    inference (a few seconds per sentence on a modern core) — a missing GPU
+    shouldn't mean "no local TTS at all", it just means slower synthesis.
+    kokoro>=0.9's KPipeline takes an explicit `device` kwarg, so we pass it
+    directly instead of assuming CUDA and bailing out when it's absent.
+    """
 
     def __init__(self):
         self.pipeline = None
@@ -228,17 +238,13 @@ class _KokoroPipeline:
             import torch
             from kokoro import KPipeline
 
-            if not torch.cuda.is_available():
-                logger.warning("CUDA not available for Kokoro TTS")
-                return
-
-            self.device = torch.device("cuda:0")
-            with torch.cuda.device(0):
-                self.pipeline = KPipeline(lang_code="a")
-                if hasattr(self.pipeline, "model"):
-                    self.pipeline.model = self.pipeline.model.to(self.device)
+            use_cuda = torch.cuda.is_available()
+            self.device = torch.device("cuda:0") if use_cuda else torch.device("cpu")
+            self.pipeline = KPipeline(lang_code="a", device=str(self.device))
+            if hasattr(self.pipeline, "model") and self.pipeline.model is not None:
+                self.pipeline.model = self.pipeline.model.to(self.device)
             self.available = True
-            logger.info("Kokoro-82M TTS pipeline loaded")
+            logger.info(f"Kokoro-82M TTS pipeline loaded on {self.device}")
         except ImportError as e:
             logger.warning(f"Kokoro TTS not available: {e}")
             logger.warning("Install with: pip install kokoro soundfile")
@@ -249,13 +255,14 @@ class _KokoroPipeline:
         if not self.available:
             return None
         try:
-            import torch
             import numpy as np
 
-            with torch.cuda.device(self.device):
-                chunks = []
-                for _, _, audio in self.pipeline(text, voice=voice):
-                    chunks.append(audio)
+            if self.device.type == "cuda":
+                import torch
+                with torch.cuda.device(self.device):
+                    chunks = [audio for _, _, audio in self.pipeline(text, voice=voice)]
+            else:
+                chunks = [audio for _, _, audio in self.pipeline(text, voice=voice)]
 
             if not chunks:
                 return None

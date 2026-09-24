@@ -169,6 +169,10 @@ if AUTH_ENABLED:
         "/api/shadow/device/enroll",
         "/api/shadow/device/poll",
         "/api/shadow/device/result",
+        # Device-token authenticated (see _device_from_request), not session
+        # authenticated — same as poll/result above. The installer calls it
+        # with the Bearer token enrollment just issued.
+        "/api/shadow/device/remote-config",
         "/api/health",
         "/api/version",
         "/login",
@@ -717,8 +721,8 @@ app.include_router(setup_shadow_routes())
 from routes.browser_routes import setup_browser_routes
 app.include_router(setup_browser_routes())
 
-from routes.workspace_agent_routes import setup_workspace_agent_routes
-app.include_router(setup_workspace_agent_routes())
+from routes.mission_routes import setup_mission_routes
+app.include_router(setup_mission_routes())
 
 from routes.music_routes import setup_music_routes
 app.include_router(setup_music_routes())
@@ -776,6 +780,10 @@ async def serve_gallery(request: Request):
 
 @app.get("/command")
 async def serve_command(request: Request):
+    return await serve_index(request)
+
+@app.get("/missions")
+async def serve_missions(request: Request):
     return await serve_index(request)
 
 @app.get("/telegram")
@@ -933,6 +941,13 @@ async def startup_event():
     # (Telegram bridge) via the shared data/ volume.
     from src.browser_tasks import worker_loop as _browser_task_worker
     _startup_tasks.append(asyncio.create_task(_browser_task_worker()))
+
+    # Missions interrupted by a restart become paused + resumable, never lost.
+    try:
+        from src.mission_engine import recover_missions
+        recover_missions()
+    except Exception as e:
+        logger.warning(f"Mission recovery failed: {e}")
 
     # Agent sessions interrupted by a restart become stopped + resumable.
     try:

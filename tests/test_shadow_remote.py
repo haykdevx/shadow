@@ -99,3 +99,57 @@ def test_remote_devices_are_sanitized(monkeypatch):
         "os": "Windows 11",
         "connected": True,
     }]
+
+
+def test_agent_config_returns_group_id_and_same_origin_paths(monkeypatch):
+    """The installer gets everything it needs to join unattended."""
+    calls = []
+
+    def fake_request(path, payload=None, **_kwargs):
+        calls.append((path, payload))
+        if path == "/groupid":
+            return {"ok": True, "group_id": "AbC123$xyz@", "full_id": "mesh/remote/AbC123$xyz@"}
+        return {"ok": True}
+
+    monkeypatch.setattr(shadow_remote, "_request", fake_request)
+    config = shadow_remote.agent_config("alice")
+
+    assert config["group_id"] == "AbC123$xyz@"
+    # Paths only — the installer joins them to the server it enrolled against,
+    # so the result must never carry a hostname.
+    assert config["public_path"] == "/remote/"
+    assert config["agent_settings_path"] == "/remote/meshsettings"
+    assert config["agent_script_path"] == "/remote/meshagents?script=1"
+    assert config["agent_binary_path"] == "/remote/meshagents"
+    for value in config.values():
+        assert "://" not in str(value)
+    # The account is provisioned first, so a brand-new device works immediately.
+    assert [path for path, _payload in calls] == ["/provision", "/groupid"]
+
+
+def test_agent_config_is_scoped_to_the_owner_group(monkeypatch):
+    seen = []
+
+    def fake_request(path, payload=None, **_kwargs):
+        if path == "/groupid":
+            seen.append(payload["group"])
+            return {"ok": True, "group_id": "id-" + payload["group"]}
+        return {"ok": True}
+
+    monkeypatch.setattr(shadow_remote, "_request", fake_request)
+    alice = shadow_remote.agent_config("alice")
+    bob = shadow_remote.agent_config("bob")
+
+    assert seen[0] != seen[1]
+    assert alice["group_id"] != bob["group_id"]
+
+
+def test_agent_config_rejects_a_missing_group_id(monkeypatch):
+    def fake_request(path, payload=None, **_kwargs):
+        if path == "/groupid":
+            return {"ok": True, "group_id": ""}
+        return {"ok": True}
+
+    monkeypatch.setattr(shadow_remote, "_request", fake_request)
+    with pytest.raises(shadow_remote.ShadowRemoteError):
+        shadow_remote.agent_config("alice")

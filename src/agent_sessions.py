@@ -1,14 +1,14 @@
 """Direct Agent Sessions: one model, one workspace, one conversational tool loop.
 
-The lightweight alternative to direct workspace automation for everyday coding and
+The lightweight alternative to Autonomous Missions for everyday coding and
 file tasks: the user picks a device + workspace + model, types a task, and
 the model immediately inspects and edits the real files through the same
-policy-checked workspace dispatch path (``src.workspace_service.dispatch``
-→ ``src.workspace_policy.evaluate`` → device relay). There is no planner DAG —
+policy-checked dispatch path missions use (``src.mission_workspaces.dispatch``
+→ ``src.mission_policy.evaluate`` → device relay). There is no planner DAG —
 just a bounded, strictly-JSON tool loop with the full conversation preserved,
 so follow-up messages continue in context.
 
-Safety is enforced for every run: a checkpoint opens before the first
+Safety is identical to missions: a checkpoint opens before the first
 mutation, deletes are soft (workspace trash), every file read/changed and
 command executed is recorded, and rollback restores the checkpoint.
 
@@ -33,9 +33,9 @@ from pathlib import Path
 from typing import Any
 
 from core.atomic_io import atomic_write_json
-from src import workspace_policy, workspace_service
-from src.workspace_policy import audit
-from src.workspace_service import (
+from src import mission_policy, mission_workspaces
+from src.mission_policy import audit
+from src.mission_workspaces import (
     WorkspaceApprovalRequired,
     WorkspaceDenied,
     WorkspaceError,
@@ -43,7 +43,7 @@ from src.workspace_service import (
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.getenv("SHADOW_AGENT_DATA", "data/workspace-agent"))
+DATA_DIR = Path(os.getenv("SHADOW_MISSIONS_DATA", "data/missions"))
 SESSIONS_DIR = DATA_DIR / "sessions"
 
 # Budgets — enforced, not advisory.
@@ -55,31 +55,6 @@ APPROVAL_WAIT_SECONDS = 24 * 3600
 MAX_TRANSCRIPT_ENTRIES = 240
 MAX_EVENTS = 1000
 MAX_TERMINAL = 120
-MAX_HISTORY = 20
-
-# ── canonical per-run state machine ──────────────────────────────────────
-# `status` (created/running/waiting_approval/completed/failed/stopped/
-# rolled_back) is the durable, route-facing lifecycle used by existing
-# callers and tests. `phase` is the finer-grained live picture of what the
-# runner is doing *right now* within that status, for richer UI.
-PHASE_IDLE = "idle"
-PHASE_THINKING = "thinking"
-PHASE_TOOL_PENDING = "tool_pending"
-PHASE_TOOL_RUNNING = "tool_running"
-PHASE_STREAMING = "streaming"  # reserved: model calls here are not token-streamed
-PHASE_WAITING_FOR_USER = "waiting_for_user"
-PHASE_COMPLETED = "completed"
-PHASE_FAILED = "failed"
-PHASE_CANCELLED = "cancelled"
-
-# Tools a READ_ONLY run may use. Everything else in WORKSPACE_ACTIONS mutates
-# the filesystem, runs commands, or rewrites git history and is denied
-# server-side (not just "discouraged") for the duration of that run.
-READ_ONLY_TOOLS = frozenset({
-    "ws_tree", "ws_stat", "ws_read", "ws_search", "ws_hash", "ws_diff",
-    "git_info", "git_diff", "git_log",
-})
-MUTATING_TOOLS = workspace_service.WORKSPACE_ACTIONS - READ_ONLY_TOOLS
 
 _LOCK = threading.RLock()
 
@@ -109,22 +84,6 @@ def _save(session: dict[str, Any]) -> None:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     session["updated_at"] = time.time()
     atomic_write_json(str(_session_path(session["id"])), session, indent=2)
-
-
-def _save_if_current(session: dict[str, Any], run_id: str) -> None:
-    """Persist unless a newer run has already taken over this session.
-
-    Guards against a cancelled/stale runner's terminal-state write landing
-    after a follow-up has already started a new run leg (new run_id) — a
-    cancelled run must never publish a late/stale final answer.
-    """
-    try:
-        fresh = load_session(session["owner"], session["id"])
-    except AgentSessionError:
-        fresh = None
-    if fresh is not None and fresh.get("run_id") != run_id:
-        return
-    _save(session)
 
 
 def load_session(owner: str, session_id: str) -> dict[str, Any]:
@@ -168,8 +127,7 @@ def list_sessions(owner: str, limit: int = 50) -> list[dict[str, Any]]:
 
 def _event(session: dict[str, Any], kind: str, text: str, **extra: Any) -> None:
     session.setdefault("events", []).append({
-        "ts": time.time(), "kind": kind, "text": str(text)[:800],
-        "run_id": session.get("run_id") or "", **extra,
+        "ts": time.time(), "kind": kind, "text": str(text)[:800], **extra,
     })
     if len(session["events"]) > MAX_EVENTS:
         session["events"] = session["events"][-MAX_EVENTS:]
@@ -219,57 +177,6 @@ async def _llm(session: dict[str, Any], messages: list[dict[str, str]],
     return raw or ""
 
 
-# ── intent classification (server-enforced, not advisory) ───────────────
-
-# An explicit "do not change files"-style instruction always wins, regardless
-# of any mutating verb elsewhere in the same message.
-_READ_ONLY_OVERRIDE_RE = re.compile(
-    r"\b(?:do\s*not|don'?t|never|please\s+do\s*not|without)\b[^.?!\n]{0,40}"
-    r"\b(?:modify|change|edit|write|alter|touch|delete|create|update)\b[^.?!\n]{0,25}\bfiles?\b"
-    r"|\bread[\s-]?only\b"
-    r"|\b(?:analysis|review|inspection)\s+only\b"
-    r"|\bno\s+(?:file\s+)?changes?\b"
-    r"|\bdon'?t\s+(?:run|execute)\s+anything\b"
-    r"|\bwithout\s+(?:making|writing)\s+any\s+changes?\b",
-    re.IGNORECASE,
-)
-
-_MUTATING_VERB_RE = re.compile(
-    r"\b(?:implement|fix|create|add|write|edit|modify|change|update|refactor|"
-    r"delete|remove|rename|move|patch|install|uninstall|upgrade|downgrade|"
-    r"format|reformat|build|compile|commit|checkout|merge|rebase|generate|"
-    r"scaffold|bump|clean\s*up|migrate|deploy|configure)\b",
-    re.IGNORECASE,
-)
-
-_READ_ONLY_VERB_RE = re.compile(
-    r"\b(?:analy[sz]e|explain|review|inspect|summari[sz]e|describe|audit|"
-    r"investigate|assess|evaluate|understand|walk\s*through|document|"
-    r"list|show|find|search|look\s+at|what|why|how)\b",
-    re.IGNORECASE,
-)
-
-
-def classify_intent(text: str) -> str:
-    """Deterministic READ_ONLY vs MUTATING classification for a task/message.
-
-    Explicit "do not change files" / "read-only" / "analysis only" phrasing
-    always wins and returns ``"read_only"``, overriding any mutating verb in
-    the same text. Otherwise a mutating verb (implement/fix/create/...) makes
-    the run ``"mutating"``; failing that, an analysis verb (analyze/explain/
-    review/...) makes it ``"read_only"``. Ambiguous text defaults to
-    ``"mutating"`` — an agent explicitly asked to act should be able to.
-    """
-    text = str(text or "")
-    if _READ_ONLY_OVERRIDE_RE.search(text):
-        return "read_only"
-    if _MUTATING_VERB_RE.search(text):
-        return "mutating"
-    if _READ_ONLY_VERB_RE.search(text):
-        return "read_only"
-    return "mutating"
-
-
 def _parse_json_block(raw: str) -> dict[str, Any]:
     text = str(raw or "").strip()
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
@@ -297,7 +204,7 @@ def create_session(
     task = str(task or "").strip()
     if not task or len(task) < 4:
         raise AgentSessionError("A session needs a real task")
-    workspace = workspace_service.get_workspace(owner, workspace_id)  # owner check
+    workspace = mission_workspaces.get_workspace(owner, workspace_id)  # owner check
     if not isinstance(model, dict) or not model.get("endpoint_id") or not model.get("model"):
         raise AgentSessionError("Select a model for this session")
     clean_fallbacks = [
@@ -326,16 +233,10 @@ def create_session(
         "approvals": [],
         "files_read": [],
         "files_changed": [],
-        "files_changed_total": [],
         "commands": [],
         "usage": {"llm_calls": 0, "actions": 0, "by_model": {}},
         "checkpoint": None,
         "report": "",
-        "run_id": "",
-        "run_seq": 0,
-        "phase": PHASE_IDLE,
-        "intent": "mutating",
-        "history": [],
         "created_at": time.time(),
     }
     _event(session, "created", f"workspace={workspace['name']} model={model['model']}")
@@ -350,8 +251,7 @@ def create_session(
 # ── dispatch + bookkeeping ───────────────────────────────────────────────
 
 
-async def _dispatch(session: dict[str, Any], action: str, args: dict[str, Any],
-                    *, mode: str | None = None) -> dict[str, Any]:
+async def _dispatch(session: dict[str, Any], action: str, args: dict[str, Any]) -> dict[str, Any]:
     usage = session.setdefault("usage", {"llm_calls": 0, "actions": 0, "by_model": {}})
     if usage["actions"] >= MAX_ACTIONS:
         raise AgentSessionError(f"Session action budget exhausted ({MAX_ACTIONS})")
@@ -359,10 +259,10 @@ async def _dispatch(session: dict[str, Any], action: str, args: dict[str, Any],
     # mode=None: the workspace's *current* mode decides, so flipping the
     # Unattended toggle applies to the very next action of a live session.
     result = await asyncio.to_thread(
-        workspace_service.dispatch,
+        mission_workspaces.dispatch,
         session["owner"], session["workspace_id"], action, args,
-        mode=mode,
-        session_id=session["id"],
+        mode=None,
+        mission_id=session["id"],
     )
     _record_effects(session, action, args, result)
     return result
@@ -381,15 +281,12 @@ def _record_effects(session: dict[str, Any], action: str, args: dict[str, Any],
         _add("files_read", str(args.get("path") or ""))
     elif action in {"ws_write", "ws_rename", "ws_delete", "ws_mkdir"}:
         _add("files_changed", str(args.get("path") or ""))
-        _add("files_changed_total", str(args.get("path") or ""), cap=2000)
         if action == "ws_rename" and args.get("to"):
             _add("files_changed", str(args.get("to")))
-            _add("files_changed_total", str(args.get("to")), cap=2000)
     elif action == "ws_patch":
         for edit in args.get("edits") or []:
             if isinstance(edit, dict):
                 _add("files_changed", str(edit.get("path") or ""))
-                _add("files_changed_total", str(edit.get("path") or ""), cap=2000)
     elif action == "ws_run":
         row = {
             "ts": time.time(),
@@ -415,12 +312,7 @@ async def _ensure_checkpoint(session: dict[str, Any]) -> str:
     if session.get("checkpoint"):
         return session["checkpoint"]["id"]
     checkpoint_id = f"s-{session['id']}"
-    # The pre-image snapshot is internal bookkeeping (no path args, nothing
-    # user-visible changes) — it must not itself trigger an approval prompt
-    # in ask/auto mode, or every first edit of a session would crash before
-    # the agent even gets to ask about the real change.
-    result = await _dispatch(session, "ws_checkpoint", {"checkpoint_id": checkpoint_id},
-                             mode="unattended")
+    result = await _dispatch(session, "ws_checkpoint", {"checkpoint_id": checkpoint_id})
     session["checkpoint"] = {
         "id": checkpoint_id,
         "git": result.get("git"),
@@ -464,9 +356,9 @@ def resolve_approval(owner: str, session_id: str, approval_id: str, decision: st
                      if a.get("id") == approval_id and a.get("status") == "pending"), None)
     if not approval:
         raise AgentSessionError("Approval not found or already resolved")
-    scope_map = {"allow_once": "once", "allow_session": "session", "allow_always": "workspace"}
+    scope_map = {"allow_once": "once", "allow_session": "mission", "allow_always": "workspace"}
     if decision in scope_map:
-        workspace_policy.GRANTS.grant(
+        mission_policy.GRANTS.grant(
             owner, scope_map[decision],
             session_id if decision != "allow_always" else "",
             approval["grant_key"],
@@ -563,34 +455,6 @@ Rules:
 - Never claim something succeeded without tool evidence. Steps are limited to {max_steps}; be economical.
 - When the user sends a follow-up message it appears in the conversation — continue from current state."""
 
-_READ_ONLY_ADDENDUM = """
-
-THIS RUN IS READ-ONLY (server-enforced, not optional). You may only call
-inspection tools: ws_tree, ws_stat, ws_read, ws_search, ws_hash, ws_diff,
-git_info, git_diff, git_log. Any other tool (ws_write, ws_patch, ws_mkdir,
-ws_rename, ws_delete, ws_run, git_checkout, git_commit, ws_checkpoint,
-ws_restore) will be denied before it runs — do not attempt them, and do not
-claim you made changes.
-
-Finish with {{"done": true, "report": "..."}} where the report is a
-substantive analysis, not a generic summary. Cover, with exact file
-references (path, and line numbers where relevant):
-- architecture: how the pieces fit together
-- concrete strengths
-- concrete weaknesses
-- security risks
-- maintainability problems
-- open-source readiness
-- prioritized recommendations
-- your confidence and any evidence you were missing"""
-
-
-def _system_message(session: dict[str, Any]) -> dict[str, str]:
-    content = _SYSTEM_PROMPT.format(max_steps=MAX_STEPS_PER_RUN)
-    if session.get("intent") == "read_only":
-        content += _READ_ONLY_ADDENDUM
-    return {"role": "system", "content": content}
-
 
 async def _execute_tool(session: dict[str, Any], action: str, args: dict[str, Any]) -> str:
     """Run one tool call; pauses durably when an approval is required."""
@@ -601,12 +465,10 @@ async def _execute_tool(session: dict[str, Any], action: str, args: dict[str, An
         except WorkspaceApprovalRequired as exc:
             approval = _add_approval(session, action, args, exc)
             session["status"] = "waiting_approval"
-            session["phase"] = PHASE_WAITING_FOR_USER
             _save(session)
             resolved = await _wait_for_approval(session, approval["id"])
             if session["status"] == "waiting_approval":
                 session["status"] = "running"
-            session["phase"] = PHASE_TOOL_RUNNING
             if resolved.get("status") == "approved":
                 _event(session, "approval_consumed", approval["summary"])
                 continue
@@ -661,7 +523,7 @@ def _rotate_fallback(session: dict[str, Any]) -> bool:
 async def _run_loop(session: dict[str, Any]) -> None:
     started = time.time()
     messages: list[dict[str, str]] = [
-        _system_message(session),
+        {"role": "system", "content": _SYSTEM_PROMPT.format(max_steps=MAX_STEPS_PER_RUN)},
         *[{"role": m["role"], "content": m["content"]} for m in session.get("transcript", [])],
     ]
     repaired_last_step = False
@@ -671,11 +533,10 @@ async def _run_loop(session: dict[str, Any]) -> None:
             raise AgentSessionError("Session wall-clock budget exhausted")
         if _drain_inbox(session):
             messages = [
-                _system_message(session),
+                {"role": "system", "content": _SYSTEM_PROMPT.format(max_steps=MAX_STEPS_PER_RUN)},
                 *[{"role": m["role"], "content": m["content"]} for m in session["transcript"]],
             ]
 
-        session["phase"] = PHASE_THINKING
         try:
             raw = await _llm(session, messages)
         except ProviderError as exc:
@@ -705,7 +566,6 @@ async def _run_loop(session: dict[str, Any]) -> None:
 
         if payload.get("done"):
             session["status"] = "completed"
-            session["phase"] = PHASE_COMPLETED
             session["report"] = str(payload.get("report") or payload.get("summary") or "")[:20000]
             if not session["report"]:
                 session["report"] = _fallback_report(session)
@@ -716,7 +576,6 @@ async def _run_loop(session: dict[str, Any]) -> None:
             return
         if payload.get("fail"):
             session["status"] = "failed"
-            session["phase"] = PHASE_FAILED
             session["error"] = str(payload["fail"])[:500]
             session["retryable"] = True
             _event(session, "failed", session["error"])
@@ -726,34 +585,16 @@ async def _run_loop(session: dict[str, Any]) -> None:
 
         action = str(payload.get("tool") or "").strip()
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
-        if action not in workspace_service.WORKSPACE_ACTIONS:
+        if action not in mission_workspaces.WORKSPACE_ACTIONS:
             note = f"Unknown tool: {action or '(missing)'}"
             session["transcript"].append({"role": "user", "content": note})
             messages.append({"role": "user", "content": note})
             _save(session)
             continue
-
-        if session.get("intent") == "read_only" and action in MUTATING_TOOLS:
-            note = (
-                f"DENIED: read-only run — '{action}' is a write/execute/git-mutate tool and "
-                f"is not permitted because this task was classified read-only. No checkpoint "
-                f"was created and no files were changed. Cite files and findings instead of "
-                f"attempting changes; if changes are actually wanted, ask the user to resend "
-                f"the request without a read-only/analysis-only instruction."
-            )
-            _event(session, "tool_denied", f"{action} — read-only run", action=action)
-            result_note = f"RESULT of {action}:\n{note}"
-            session["transcript"].append({"role": "user", "content": result_note})
-            messages.append({"role": "user", "content": result_note})
-            _trim_transcript(session)
-            _save(session)
-            continue
-
         if action in {"ws_write", "ws_patch", "ws_delete", "ws_rename", "ws_restore"}:
             args.setdefault("checkpoint_id", await _ensure_checkpoint(session))
 
-        session["phase"] = PHASE_TOOL_RUNNING
-        _event(session, "tool", workspace_service._summary_for(action, args), action=action)
+        _event(session, "tool", mission_workspaces._summary_for(action, args), action=action)
         outcome = await _execute_tool(session, action, args)
         result_note = f"RESULT of {action}:\n{outcome[:7000]}"
         session["transcript"].append({"role": "user", "content": result_note})
@@ -771,91 +612,44 @@ def _fallback_report(session: dict[str, Any]) -> str:
             f"See the activity timeline for details.")
 
 
-def _trigger_text(session: dict[str, Any]) -> str:
-    """Text driving this run leg: a queued follow-up, or the original task."""
-    inbox = [str(m) for m in (session.get("inbox") or []) if str(m or "").strip()]
-    if inbox:
-        return " ".join(inbox)
-    return str(session.get("task") or "")
-
-
 async def _runner(session_id: str, owner: str) -> None:
     session = load_session(owner, session_id)
-
-    # ── start a fresh run leg: new run_id, per-run state reset ───────────
-    run_id = secrets.token_urlsafe(6)
-    run_started = time.time()
-    session["run_id"] = run_id
-    session["run_seq"] = int(session.get("run_seq") or 0) + 1
-    session["files_changed"] = []
-    session["files_read"] = []
-    session["commands"] = []
-    session["terminal"] = []
-    session["report"] = ""
-    session["error"] = ""
-
-    inbox = [str(m) for m in (session.get("inbox") or []) if str(m or "").strip()]
-    if inbox or session["run_seq"] == 1:
-        session["intent"] = classify_intent(_trigger_text(session))
-    # else: retrying an existing run leg with no new message — keep intent
-
     try:
         session["status"] = "running"
-        session["phase"] = PHASE_THINKING
+        session["error"] = ""
         session["retryable"] = False
-        _event(session, "started",
-               f"model={((session.get('model') or {}).get('model'))} intent={session['intent']}")
+        _event(session, "started", f"model={((session.get('model') or {}).get('model'))}")
         _save(session)
         await _run_loop(session)
     except asyncio.CancelledError:
         session["status"] = "stopped"
-        session["phase"] = PHASE_CANCELLED
         session["retryable"] = True
         _event(session, "stopped", "runner stopped")
-        _save_if_current(session, run_id)
+        _save(session)
         raise
     except ProviderError as exc:
         session["status"] = "failed"
-        session["phase"] = PHASE_FAILED
         session["error"] = f"model provider failed: {exc}"
         session["retryable"] = True
         _event(session, "failed", session["error"])
-        _save_if_current(session, run_id)
+        _save(session)
     except (AgentSessionError, WorkspaceError) as exc:
         session["status"] = "failed"
-        session["phase"] = PHASE_FAILED
         session["error"] = str(exc)[:500]
         session["retryable"] = True
         _event(session, "failed", session["error"])
-        _save_if_current(session, run_id)
+        _save(session)
     except Exception as exc:  # noqa: BLE001 — one crash must not lose the record
         logger.exception("Agent session %s crashed", session_id)
         session["status"] = "failed"
-        session["phase"] = PHASE_FAILED
         session["error"] = f"internal error: {str(exc)[:300]}"
         session["retryable"] = True
         _event(session, "failed", session["error"])
-        _save_if_current(session, run_id)
+        _save(session)
     finally:
-        session.setdefault("history", []).append({
-            "run_id": run_id,
-            "run_seq": session.get("run_seq"),
-            "intent": session.get("intent"),
-            "status": session.get("status"),
-            "phase": session.get("phase"),
-            "report": session.get("report") or session.get("error") or "",
-            "files_changed": list(session.get("files_changed") or []),
-            "files_read": len(session.get("files_read") or []),
-            "commands": len(session.get("commands") or []),
-            "started_at": run_started,
-            "ended_at": time.time(),
-        })
-        if len(session["history"]) > MAX_HISTORY:
-            session["history"] = session["history"][-MAX_HISTORY:]
-        _save_if_current(session, run_id)
         _RUNNERS.pop(session_id, None)
         audit(owner, "agent_session_finished", {
-            "session_id": session_id, "run_id": run_id, "status": session.get("status"),
+            "session_id": session_id, "status": session.get("status"),
         })
 
 
@@ -928,9 +722,9 @@ async def rollback_session(owner: str, session_id: str,
     if paths:
         args["paths"] = [str(p) for p in paths][:100]
     result = await asyncio.to_thread(
-        workspace_service.dispatch,
+        mission_workspaces.dispatch,
         owner, session["workspace_id"], "ws_restore", args,
-        mode=None, session_id=session_id,
+        mode=None, mission_id=session_id,
     )
     if not paths:
         session["status"] = "rolled_back"

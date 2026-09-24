@@ -40,15 +40,14 @@ Security fixes are handled on the default branch until formal releases are cut.
 - Pending actions, audit events, the AI `pc_control` tool, and Telegram identities are scoped to the linked Shadow account. Browser approval requires an interactive account with `approve`; internal tool and bearer API tokens cannot self-approve.
 - Screenshots are captured into a temporary file, returned to the authenticated caller, and deleted immediately.
 
-## Agent Sessions & Desktop Workspace (Computer Access)
+## Autonomous Missions & Desktop Workspace
 
-- Computer access is opt-in per account: the `can_use_computer` privilege gates every workspace-agent write/dispatch route (admins always have it; new non-admin accounts default to off).
-- Every workspace/session/policy route requires an interactive cookie session. Bearer API tokens and the internal agent identity get 403 — a model can never approve its own gated action, change a permission mode, or arm full access.
-- Every tool call is declared (capability, device, workspace, mutating flag, risk, network flag, target path) and decided server-side by `src/workspace_policy.evaluate` (`ALLOW`/`REQUIRE_APPROVAL`/`DENY`). Models never decide their own permissions; the engine is pure and unit-tested.
+- Every mission/workspace/policy route requires an interactive cookie session. Bearer API tokens and the internal agent identity get 403 — a model can never approve its own gated action, change a permission mode, or arm full access.
+- Every tool call is declared (capability, device, workspace, mutating flag, risk, network flag, target path) and decided server-side by `src/mission_policy.evaluate` (`ALLOW`/`REQUIRE_APPROVAL`/`DENY`). Models never decide their own permissions. See `AUTONOMOUS_MISSIONS.md` for the full policy and threat model.
 - Containment is enforced twice: syntactic canonicalization server-side (null bytes, percent-encoding, `..`, UNC, Windows case folding) and authoritative `os.path.realpath` containment on the device against BOTH the workspace root and the device-local `SHADOW_ALLOWED_ROOTS`. Set `SHADOW_ALLOWED_ROOTS` narrowly on every device.
 - Mutating agent actions additionally require the relay job to carry `confirmed=true`, which only an ALLOW decision or explicit approval sets.
-- `full` access requires password reauthentication, is keyed to one owner+device, supports a time limit, shows a persistent indicator, writes append-only audit records (`data/workspace-agent/audit.log`), and still cannot leave the device's allowed roots. Cross-user/cross-device access is a structural DENY in every mode.
-- Agent sessions checkpoint before their first mutation (per-file pre-images + git branch on clean trees), soft-delete to a workspace trash, and support per-file and full rollback. Session approvals are in-memory and drop on restart (fail closed); `once` approvals are single-use, and "always allow" rules are per-workspace, visible, and revocable in the UI. The full audit trail is viewable in Settings → System.
+- `full` access requires password reauthentication, is keyed to one owner+device, supports a time limit, shows a persistent indicator, writes append-only audit records (`data/missions/audit.log`), and still cannot leave the device's allowed roots. Cross-user/cross-device access is a structural DENY in every mode.
+- Missions checkpoint before their first mutation (per-file pre-images + git branch on clean trees), soft-delete to a workspace trash, and support per-file and full rollback. Session/mission approvals are in-memory and drop on restart (fail closed); "always allow" rules are per-workspace, visible, and revocable in the UI.
 
 ## Agent Browser
 
