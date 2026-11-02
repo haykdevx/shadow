@@ -509,3 +509,38 @@ class AuthManager:
         if authenticated:
             result["privileges"] = self.get_privileges(username)
         return result
+
+
+def bootstrap_admin_from_env(auth_manager: "AuthManager") -> str:
+    """Seed the first admin account from SHADOW_ADMIN_USER / SHADOW_ADMIN_PASSWORD.
+
+    docker-compose.yml and DEPLOY.md document these variables as "pre-seed the
+    first-boot admin", but only the interactive ``setup.py`` ever read them —
+    a plain ``docker compose up`` left the instance in first-run setup mode,
+    where whoever reached the login page first could claim the admin account.
+    Calling this at app startup closes that gap.
+
+    Returns one of ``"created"``, ``"already_configured"``, ``"no_password"``
+    or ``"rejected"`` so callers can log the right message. Never raises.
+    """
+    try:
+        if auth_manager.is_configured:
+            return "already_configured"
+        password = (os.getenv("SHADOW_ADMIN_PASSWORD") or "").strip()
+        if not password:
+            return "no_password"
+        username = (os.getenv("SHADOW_ADMIN_USER") or "admin").strip().lower() or "admin"
+        if len(password) < 8:
+            logger.error("SHADOW_ADMIN_PASSWORD must be at least 8 characters; admin not seeded")
+            return "rejected"
+        if username in RESERVED_USERNAMES:
+            logger.error("SHADOW_ADMIN_USER %r is reserved; admin not seeded", username)
+            return "rejected"
+        if auth_manager.setup(username, password):
+            logger.info("Seeded first-boot admin account %r from SHADOW_ADMIN_PASSWORD", username)
+            return "created"
+        return "rejected"
+    except Exception as exc:  # defensive: startup must never die on this
+        logger.error("Admin bootstrap failed: %s", exc)
+        return "rejected"
+

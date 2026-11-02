@@ -196,21 +196,17 @@
     @font-face { font-family: 'Inter'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Medium.woff2') format('woff2'); }
     @font-face { font-family: 'Inter'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-SemiBold.woff2') format('woff2'); }
   </style>
-  <!-- KaTeX CSS is loaded with media="print" so it doesn't block render,
-       then flipped to "all" via JS after load. Mermaid init runs once the
-       library finishes loading. Both hooks are wired via addEventListener
-       below (inline onload= attrs are blocked by CSP script-src-attr). -->
-  <link id="katex-css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" media="print">
-  <script async src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-  <script id="mermaid-script" async src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <!-- KaTeX (vendored in static/lib so math works offline) is loaded with
+       media="print" so it doesn't block render, then flipped to "all" after
+       load via addEventListener (inline onload= attrs are blocked by CSP).
+       Mermaid (3.5 MB) is NOT loaded here: markdown.js injects it on demand
+       the first time a diagram is rendered, keeping boot off the main thread. -->
+  <link id="katex-css" rel="stylesheet" href="/static/lib/katex/katex.min.css" media="print">
+  <script async src="/static/lib/katex/katex.min.js"></script>
   <script nonce="{{CSP_NONCE}}">
     (function(){
       var k = document.getElementById('katex-css');
       if (k) k.addEventListener('load', function(){ k.media = 'all'; }, { once: true });
-      var m = document.getElementById('mermaid-script');
-      if (m) m.addEventListener('load', function(){
-        if (window.shadowInitMermaid) window.shadowInitMermaid();
-      }, { once: true });
     })();
   </script>
   <link rel="stylesheet" href="/static/style.css">

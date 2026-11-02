@@ -37,10 +37,20 @@ Windows is not actively tested. Docker on Linux or a Linux/macOS manual install 
 Run the smallest relevant checks for your change:
 
 ```bash
+pip install -r requirements-dev.txt   # once
 python scripts/public_readiness_check.py
+ruff check .
 python -m pytest
-python -m py_compile app.py routes/*.py src/*.py
+node --test tests/js/*.test.cjs
 node --check static/js/<file-you-changed>.js
+```
+
+For UI changes, run the browser smoke test against a running instance (it
+logs in, opens every workspace view, and fails on any page error, failed
+request, or same-origin HTTP error):
+
+```bash
+SHADOW_URL=http://127.0.0.1:7000 SHADOW_USER=admin SHADOW_PASSWORD=... node scripts/e2e_ui_smoke.js
 ```
 
 For Docker-related changes:

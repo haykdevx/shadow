@@ -150,6 +150,16 @@ from routes.auth_routes import setup_auth_routes, SESSION_COOKIE
 
 auth_manager = AuthManager()
 app.state.auth_manager = auth_manager
+# Pre-seed the first admin from the environment (Docker/VPS installs). When no
+# password is configured the instance stays in first-run setup mode, where the
+# first visitor to /login creates the admin account.
+from core.auth import bootstrap_admin_from_env as _bootstrap_admin
+if _bootstrap_admin(auth_manager) == "no_password" and os.getenv("AUTH_ENABLED", "true").lower() != "false":
+    logger.warning(
+        "No admin account exists yet and SHADOW_ADMIN_PASSWORD is not set — "
+        "the first visitor to /login will create the admin account. "
+        "Set SHADOW_ADMIN_PASSWORD in .env to pre-seed it."
+    )
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() != "false"
 LOCALHOST_BYPASS = os.getenv("LOCALHOST_BYPASS", "false").lower() == "true"
 if LOCALHOST_BYPASS:
@@ -390,7 +400,16 @@ class _RevalidatingStatic(StaticFiles):
         return resp
 
 
-app.mount("/static", _RevalidatingStatic(directory="static"), name="static")
+# Compress static assets (style.css alone is >1 MB uncompressed). Only the
+# static mount is wrapped — never the API — so SSE/streaming chat responses
+# are not buffered by the gzip encoder. A reverse proxy that already encodes
+# (Caddy/nginx) simply sees Content-Encoding and passes it through.
+from starlette.middleware.gzip import GZipMiddleware as _GZipMiddleware
+app.mount(
+    "/static",
+    _GZipMiddleware(_RevalidatingStatic(directory="static"), minimum_size=1024),
+    name="static",
+)
 
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")

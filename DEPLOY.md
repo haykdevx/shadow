@@ -12,6 +12,25 @@ phone -> Tailscale HTTPS -> VPS Shadow UI -> Tailscale -> home PC companion
 Do not expose the home-PC companion or the application port directly to the
 public internet.
 
+## 0. One-Command Install (recommended)
+
+On a fresh Ubuntu/Debian VPS, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/haykdevx/shadow/main/deploy/vps-install.sh -o vps-install.sh
+sudo SHADOW_DOMAIN=shadow.your-domain.tld bash vps-install.sh
+```
+
+`deploy/vps-install.sh` installs Docker and Caddy, locks the firewall down
+to SSH/80/443, clones the repository to `/opt/shadow`, writes a hardened
+`.env` (auth on, secure cookies, loopback-only app port, generated admin
+password), brings the Compose stack up, waits for `/api/health`, and prints
+the admin credentials once. Omit `SHADOW_DOMAIN` to serve `https://<ip>` with
+a self-signed certificate until you have DNS. Re-running the script updates
+the checkout and restarts the stack without touching `.env` or `data/`.
+
+The manual steps below are what the script automates.
+
 ## 1. VPS Bootstrap
 
 Use a fresh Ubuntu VPS, SSH keys, and an unprivileged deployment user.
@@ -49,7 +68,11 @@ SHADOW_ADMIN_USER=YOUR_ADMIN_NAME
 SHADOW_ADMIN_PASSWORD=USE_A_RANDOM_FIRST_BOOT_PASSWORD
 ```
 
-`SHADOW_*` is the environment-variable prefix. Start the stack:
+`SHADOW_ADMIN_USER` / `SHADOW_ADMIN_PASSWORD` are read by the app on its
+first start: if no account exists yet, that admin is created automatically.
+Without a password the instance stays in first-run setup mode and the first
+visitor to `/login` creates the admin, so always set one before exposing the
+host. `SHADOW_*` is the environment-variable prefix. Start the stack:
 
 ```bash
 docker compose up -d --build

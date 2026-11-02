@@ -57,6 +57,10 @@ function _onModalOpened(modal) {
   // Don't interrupt the welcome / tour itself
   if (document.body.classList.contains('tour-active')) return;
   if (document.getElementById('tour-tooltip')) return;
+  // Another first-open hint (e.g. the Notes intro) is already on screen —
+  // showing two cards at once makes them overlap. Leave `_shown` unset so
+  // the snap tip simply tries again on the next window open.
+  if (document.querySelector('.tour-hint')) return;
   // Mobile: skip — snapping isn't a desktop-only feature there
   if (window.innerWidth <= 768) return;
 

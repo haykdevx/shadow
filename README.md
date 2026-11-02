@@ -169,6 +169,8 @@ Safety is enforced server-side, not by prompting: every endpoint requires an int
 **NERV interface** (`static/js/magi.js` + the MAGI theme in `static/style.css`): a near-black amber-terminal sub-theme with a triangular three-node layout (stacked on mobile) around a central bilingual verdict readout — `DELIBERATING / 審議中`, `APPROVED / 可決`, `REJECTED / 否決`, `MALFUNCTION / 停止` — color-coded green/red/amber by stance, with `UNANIMOUS · MAJORITY · DEADLOCK · DEGRADED` status, CSS-only scanlines and corner ticks, expandable per-unit answers, and `prefers-reduced-motion` support. Confidence is rendered as a percentage while the backend stays on the `0..1` scale.
 
 ### Deployment
+
+For a VPS, `deploy/vps-install.sh` is a one-command install (Docker + Caddy HTTPS + firewall + admin seeding); see [DEPLOY.md](DEPLOY.md).
 - **Docker Compose**, single command. The image (`python:3.12-slim`) bundles Node, Deno, `tmux`, `gosu`, and OpenSSH; the entrypoint drops to `PUID/PGID` (default `1000:1000`) and repairs bind-mount ownership.
 - For internet exposure: an **nginx** reverse proxy terminating TLS via **Let's Encrypt**, proxying to the loopback-bound app. See [DEPLOY.md](DEPLOY.md) for the hardened runbook and [MAP.md](MAP.md) for verified extension boundaries.
 
@@ -213,7 +215,7 @@ Dockerfile          python:3.12-slim + Node + Deno + system deps
 
 Defaults work out of the box: clone, run, then configure models/search/email inside **Settings**. Only edit `.env` for deployment-level overrides (`APP_BIND`, `APP_PORT`, `AUTH_ENABLED`, `DATABASE_URL`, a pre-seeded admin password, …).
 
-On first setup Shadow creates an admin account (`admin` unless `SHADOW_ADMIN_USER` is set) and prints a temporary password in the terminal — for Docker, see `docker compose logs shadow`. Use it to log in, then change it in **Settings**.
+On first start Shadow creates the admin account from `SHADOW_ADMIN_USER` / `SHADOW_ADMIN_PASSWORD` in `.env` (`admin` by default). If no password is set, the first visitor to `/login` is asked to create it — so set one before exposing the host. The native `setup.py` path can also generate and print a temporary password. Change it in **Settings** and enable 2FA.
 
 ### Desktop app (easiest)
 A native desktop app for **Linux · Windows · macOS** that runs the full stack locally with one command, then pins to your dock — no terminal afterwards.

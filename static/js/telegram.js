@@ -78,8 +78,7 @@ function build() {
       <button class="tg-embed-close" data-tg-embed-close aria-label="Close Telegram">✕</button>
     </div>
     <iframe class="tg-embed-frame" title="Telegram"
-      allow="clipboard-read; clipboard-write; microphone; camera; autoplay; fullscreen; web-share; notifications"
-      allowfullscreen></iframe>
+      allow="clipboard-read; clipboard-write; microphone; camera; autoplay; fullscreen"></iframe>
   `;
   iframe = node.querySelector('.tg-embed-frame');
   node.querySelector('[data-tg-embed-close]')

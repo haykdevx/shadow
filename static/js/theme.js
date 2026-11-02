@@ -121,6 +121,7 @@ export function deleteCustomTheme(name) {
   initThemeUI();
 }
 function _syncCustomThemesToServer(ct) {
+  if (!_canSyncWithServer()) return;
   try {
     fetch('/api/prefs/custom-themes', {
       method: 'PUT',
@@ -469,6 +470,7 @@ export function save(name, colors, opts) {
 }
 
 function _syncToServer(obj) {
+  if (!_canSyncWithServer()) return;
   try {
     fetch('/api/prefs/theme', {
       method: 'PUT',
@@ -482,6 +484,7 @@ function _syncToServer(obj) {
 async function _loadFromServer() {
   try {
     const res = await fetch('/api/prefs/theme', { credentials: 'same-origin' });
+    if (!res.ok) return null;
     const data = await res.json();
     return data.value || null;
   } catch { return null; }
@@ -2058,7 +2061,18 @@ const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
 export default themeModule;
 
 // Init on DOM ready, with server-side sync fallback
+// Server-side theme sync requires an authenticated session. On the login
+// page there is none yet, so calling /api/prefs/* there only produces 401
+// console errors on every visit; the saved local theme is applied instead.
+function _canSyncWithServer() {
+  try {
+    const path = window.location && window.location.pathname || '';
+    return !path.startsWith('/login');
+  } catch { return false; }
+}
+
 async function _initWithSync() {
+  if (!_canSyncWithServer()) { initThemeUI(); return; }
   // If no local theme, try loading from server (cross-device sync)
   if (!getSaved()) {
     const serverTheme = await _loadFromServer();

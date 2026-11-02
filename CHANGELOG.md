@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Production hardening (2026-11)
+
+- **Fixed a broken fresh install.** The Remote Desktop merge had deleted
+  `.env.example` and the Cookbook model catalog; both are restored, the
+  SQLite data directory is created on first start, and the suite passes on a
+  fresh clone again.
+- **Admin pre-seeding now works in Docker.** `SHADOW_ADMIN_USER` /
+  `SHADOW_ADMIN_PASSWORD` were documented but only read by the interactive
+  `setup.py`; the app now seeds the first admin from them at startup and
+  warns loudly when an unconfigured instance is left in first-visitor setup
+  mode.
+- **Runtime bugs:** device pairing page raised `NameError` (missing
+  `require_admin` import); email auto-summary raised `UnboundLocalError`
+  from a shadowed `_q` helper.
+- **Login page polish:** no more 401 console errors from theme sync before
+  sign-in; the window-snap tip no longer overlaps the Notes intro hint;
+  Telegram iframe permission warnings removed.
+- **Offline-ready assets:** KaTeX and Mermaid are vendored under
+  `static/lib/` instead of loaded from jsdelivr, so math and diagrams render
+  on air-gapped or CDN-blocked installs and the CSP no longer needs the CDN
+  for styles/fonts.
+- **One-command VPS install:** `deploy/vps-install.sh` (Docker + Caddy HTTPS
+  + UFW + admin seeding, idempotent re-runs).
+- **Repo hygiene:** removed committed backup trees and duplicated modules
+  (`services/*` copies now alias the canonical `src/*` implementation), fixed
+  stale repository URLs, removed unused imports.
+- **CI:** pytest on Python 3.11–3.13, ruff defect rules, JS unit tests,
+  `docker compose config`, Dependabot; `requirements-dev.txt` for a fast
+  test install; healthcheck on the `shadow` container.
+
 ### Agent Sessions & Unattended mode
 
 - Added **Agent Sessions**: a direct, conversational tool loop (no planner

@@ -108,9 +108,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 script_extra = " 'unsafe-eval'"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
+                # cdn.jsdelivr.net remains in script-src only for the on-demand
+                # Pyodide runtime (static/js/codeRunner.js); KaTeX and Mermaid
+                # are vendored under static/lib so styles/fonts are same-origin.
                 f"script-src 'self' 'nonce-{nonce}'{script_extra} https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                "font-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self'; "
                 "img-src 'self' data: blob:; "
                 "media-src 'self' blob:; "
                 "connect-src 'self'; "

@@ -659,16 +659,37 @@ export function renderContent(content) {
  * Initialize any unprocessed Mermaid diagrams in a container (or whole document)
  */
 export function renderMermaid(container) {
-  if (!window.mermaid) return;
-  initMermaid();
   const target = container || document;
   const pending = target.querySelectorAll('pre.mermaid:not([data-processed])');
   if (pending.length === 0) return;
+  if (!window.mermaid) {
+    // Load the 3.5 MB bundle only now that a diagram actually exists, then
+    // come back for the same nodes. Script injection is same-origin so it
+    // satisfies the strict CSP without a nonce.
+    _loadMermaid().then(() => renderMermaid(container)).catch(e => console.warn('Mermaid load failed:', e));
+    return;
+  }
+  initMermaid();
   try {
     window.mermaid.run({ nodes: pending });
   } catch (e) {
     console.warn('Mermaid render error:', e);
   }
+}
+
+let _mermaidLoading = null;
+function _loadMermaid() {
+  if (window.mermaid) return Promise.resolve();
+  if (_mermaidLoading) return _mermaidLoading;
+  _mermaidLoading = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = '/static/lib/mermaid.min.js';
+    el.async = true;
+    el.onload = () => { initMermaid(); resolve(); };
+    el.onerror = () => { _mermaidLoading = null; reject(new Error('mermaid.min.js failed to load')); };
+    document.head.appendChild(el);
+  });
+  return _mermaidLoading;
 }
 
 const markdownModule = {
@@ -686,7 +707,7 @@ const markdownModule = {
 
 export default markdownModule;
 
-// Mermaid is loaded async so it cannot delay the app shell.
+// Mermaid is loaded on demand (see _loadMermaid) so it never delays the app shell.
 function initMermaid() {
   if (!window.mermaid || window.__shadowMermaidReady) return;
   window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
