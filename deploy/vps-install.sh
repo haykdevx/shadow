@@ -15,6 +15,9 @@
 #   SHADOW_ADMIN_USER  first admin username (default: admin)
 #   SHADOW_ADMIN_PASSWORD
 #                      first admin password (default: generated and printed once)
+#   SHADOW_SKIP_CHECKOUT=1
+#                      deploy the checkout already at SHADOW_DIR as-is (no git
+#                      clone/fetch) — for local forks or a patched tree.
 #
 # Idempotent: re-running updates the checkout and restarts the stack; it never
 # overwrites an existing .env or data/.
@@ -63,11 +66,15 @@ ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null
 
-log "Checkout ${SHADOW_REPO} @ ${SHADOW_BRANCH} → ${SHADOW_DIR}"
-if [ -d "${SHADOW_DIR}/.git" ]; then
+if [ "${SHADOW_SKIP_CHECKOUT:-0}" = 1 ]; then
+  log "Using existing checkout at ${SHADOW_DIR} (SHADOW_SKIP_CHECKOUT=1)"
+  [ -f "${SHADOW_DIR}/docker-compose.yml" ] || die "${SHADOW_DIR} does not contain a Shadow checkout"
+elif [ -d "${SHADOW_DIR}/.git" ]; then
+  log "Updating ${SHADOW_DIR} from ${SHADOW_REPO} @ ${SHADOW_BRANCH}"
   git -C "${SHADOW_DIR}" fetch --depth 1 origin "${SHADOW_BRANCH}"
   git -C "${SHADOW_DIR}" checkout -q -B "${SHADOW_BRANCH}" "origin/${SHADOW_BRANCH}"
 else
+  log "Cloning ${SHADOW_REPO} @ ${SHADOW_BRANCH} → ${SHADOW_DIR}"
   git clone --depth 1 --branch "${SHADOW_BRANCH}" "${SHADOW_REPO}" "${SHADOW_DIR}"
 fi
 cd "${SHADOW_DIR}"
