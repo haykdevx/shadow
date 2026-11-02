@@ -211,6 +211,21 @@ class MemoryManager:
             entry["owner"] = owner
         return entry
 
+    def claim_ownerless(self, owner: str) -> None:
+        """Assign all ownerless memory entries to the given owner (one-off migration)."""
+        entries = self.load_all()
+        changed = False
+        for e in entries:
+            if not e.get("owner"):
+                e["owner"] = owner
+                changed = True
+        if changed:
+            self.save(entries)
+            logger.info(
+                "Claimed %d ownerless memories for %s",
+                sum(1 for e in entries if e.get("owner") == owner), owner,
+            )
+
     def increment_uses(self, ids: List[str]) -> None:
         """Bump the uses counter for each memory id. Called after a memory has
         actually been injected into a chat's context (not just retrieved)."""

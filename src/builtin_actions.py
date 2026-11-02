@@ -1480,7 +1480,6 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
     """
     try:
         import json as _json
-        import time as _time
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         from pathlib import Path as _P
         from core.database import SessionLocal as _SL, Note as _N
@@ -1636,10 +1635,8 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
         import json as _json
         import email as _email_mod
         import asyncio as _aio
-        import os as _os
         import re as _re
         import time as _time
-        import httpx
         from datetime import datetime as _dt, timedelta as _td
         from pathlib import Path as _P
         from core.database import SessionLocal as _SL, EmailAccount as _EA

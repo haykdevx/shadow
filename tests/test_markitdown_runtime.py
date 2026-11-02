@@ -62,6 +62,7 @@ def test_markitdown_exts_cover_dropped_office_formats():
 def test_convert_extracts_real_docx(tmp_path):
     """End-to-end: a .docx round-trips to Markdown with a heading (needs markitdown)."""
     pytest.importorskip("markitdown")
+    pytest.importorskip("mammoth")  # markitdown[docx] extra
     Document = pytest.importorskip("docx").Document
 
     doc = Document()

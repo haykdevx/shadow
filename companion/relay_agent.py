@@ -12,7 +12,6 @@ import json
 import os
 import platform
 import socket
-import sys
 import time
 import urllib.error
 import urllib.request

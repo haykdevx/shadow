@@ -218,7 +218,7 @@ On first setup Shadow creates an admin account (`admin` unless `SHADOW_ADMIN_USE
 ### Desktop app (easiest)
 A native desktop app for **Linux · Windows · macOS** that runs the full stack locally with one command, then pins to your dock — no terminal afterwards.
 ```bash
-git clone https://github.com/haykdevx/dev.git
+git clone https://github.com/haykdevx/shadow.git
 cd dev
 ./run.sh                     # Linux/macOS — first run sets everything up
 # Windows (PowerShell):  ./desktop/run.ps1
@@ -227,7 +227,7 @@ Requires **Docker** (Desktop/Engine) and **Python 3**. The first `./run.sh` buil
 
 ### Docker (recommended)
 ```bash
-git clone https://github.com/haykdevx/dev.git
+git clone https://github.com/haykdevx/shadow.git
 cd dev
 cp .env.example .env        # optional, recommended for explicit defaults
 docker compose up -d --build
@@ -236,7 +236,7 @@ Open `http://localhost:7000` once the containers are healthy. The UI binds to `1
 
 ### Native (Linux / macOS)
 ```bash
-git clone https://github.com/haykdevx/dev.git
+git clone https://github.com/haykdevx/shadow.git
 cd dev
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
@@ -311,8 +311,8 @@ MIT — see [LICENSE](LICENSE).
 
 <a href="https://www.star-history.com/?repos=haykdevx%2Fdev&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=haykdevx/dev&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=haykdevx/dev&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=haykdevx/dev&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=haykdevx/shadow&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=haykdevx/shadow&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=haykdevx/shadow&type=date&legend=top-left" />
  </picture>
 </a>

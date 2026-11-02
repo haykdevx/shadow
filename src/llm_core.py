@@ -307,7 +307,7 @@ def _provider_headers(provider: str, headers: Optional[Dict] = None) -> Dict[str
     if isinstance(headers, dict):
         h.update(headers)
     if provider == "openrouter":
-        h.setdefault("HTTP-Referer", "https://github.com/haykdevx/dev")
+        h.setdefault("HTTP-Referer", "https://github.com/haykdevx/shadow")
         h.setdefault("X-OpenRouter-Title", "Shadow")
     return h
 

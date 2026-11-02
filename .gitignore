@@ -100,3 +100,8 @@ _scratch/
 .polish-backup/
 # Desktop app virtualenv
 desktop/.venv-desktop/
+
+# Local backup/scratch copies — never ship
+.magi-bak/
+.deploy-backups/
+*.bak

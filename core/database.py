@@ -3,8 +3,7 @@ import logging
 from datetime import datetime
 from sqlalchemy import create_engine, Column, String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index, func, text
 from sqlalchemy.types import TypeDecorator
-from sqlalchemy.ext.declarative import declarative_base, declared_attr
-from sqlalchemy.orm import relationship, sessionmaker, backref
+from sqlalchemy.orm import declarative_base, declared_attr, relationship, sessionmaker, backref
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +22,18 @@ class TimestampMixin:
 
 # Get database URL from environment, default to SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
+
+# SQLite needs its parent directory to exist before the first connection —
+# on a fresh clone `data/` is git-ignored and absent, which otherwise fails
+# at import time with "unable to open database file".
+if DATABASE_URL.startswith("sqlite:///"):
+    _sqlite_path = DATABASE_URL[len("sqlite:///"):]
+    if _sqlite_path and _sqlite_path != ":memory:":
+        _sqlite_dir = os.path.dirname(os.path.abspath(_sqlite_path))
+        try:
+            os.makedirs(_sqlite_dir, exist_ok=True)
+        except OSError as _exc:  # pragma: no cover - surfaced by SQLAlchemy below
+            logger.warning("Could not create database directory %s: %s", _sqlite_dir, _exc)
 
 # Create engine
 engine = create_engine(

@@ -12,7 +12,6 @@ them to the correct HTTP status codes (400 / 409).
 """
 from __future__ import annotations
 
-import asyncio
 import collections
 import html
 import io
@@ -391,7 +390,6 @@ async def _normalize_message(message: Any, client: Any, read_max_id: Optional[in
         DocumentAttributeSticker,
         DocumentAttributeFilename,
         DocumentAttributeImageSize,
-        ReactionEmoji,
     )
 
     # Sender name
@@ -1723,7 +1721,6 @@ async def search_messages(
     slug = _slug(username)
     client = await _get_client(slug)
     from telethon import utils  # type: ignore
-    from telethon.tl.types import User, Channel, Chat  # type: ignore
 
     results: List[Dict[str, Any]] = []
 
@@ -1806,7 +1803,6 @@ async def search_dialogs(
     slug = _slug(username)
     client = await _get_client(slug)
     from telethon import functions, utils  # type: ignore
-    from telethon.tl.types import User, Chat, Channel  # type: ignore
 
     seen_ids: set = set()
     results: List[Dict[str, Any]] = []
@@ -2284,7 +2280,6 @@ async def get_sticker_bytes(username: str, doc_id: str) -> Optional[Tuple[bytes,
     """
     slug = _slug(username)
     client = await _get_client(slug)
-    from telethon.tl import types  # type: ignore
 
     doc = _doc_cache.get(str(doc_id))
     if doc is None:
@@ -3322,7 +3317,7 @@ async def resolve_target(username: str, target: str) -> Dict[str, Any]:
     slug = _slug(username)
     client = await _get_client(slug)
     from telethon import utils  # type: ignore
-    from telethon.tl.types import User, Channel, Chat  # type: ignore
+    from telethon.tl.types import User, Channel  # type: ignore
     from telethon.tl import functions  # type: ignore
 
     target = (target or "").strip().lstrip("@")

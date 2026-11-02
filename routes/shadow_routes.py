@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -42,7 +41,6 @@ from src.shadow_devices import (
     touch_device,
 )
 from src.shadow_pc import (
-    READ_ACTIONS,
     ShadowPcError,
     cancel_action,
     confirm_action,

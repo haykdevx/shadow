@@ -1,3 +1,19 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:sqlalchemy.*",
+]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+extend-exclude = ["static", "desktop", "packaging", "scripts/compound"]
+
+[tool.ruff.lint]
+# Baseline: only rules that indicate real defects (syntax errors, undefined
+# names, unreachable/incorrect comparisons). Style rules are intentionally off
+# so the lint gate is a bug gate, not a formatting gate.
+select = ["E9", "F63", "F7", "F82", "F401"]
+per-file-ignores = { "__init__.py" = ["F401"], "src/database.py" = ["F401"], "scripts/*" = ["F401"], "tests/*" = ["F401", "F811"] }

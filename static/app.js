@@ -3657,11 +3657,9 @@ function startShadowApp() {
 
     // Group chat: route to group module
     if (groupModule && groupModule.isActive()) {
-      console.log('[group] Submit intercepted');
       const msgInput = document.getElementById('message');
       const msg = msgInput ? msgInput.value.trim() : '';
-      if (!msg) { console.log('[group] Empty message, skipping'); return; }
-      console.log('[group] Sending:', msg);
+      if (!msg) return;
       chatRenderer.hideWelcomeScreen();
       chatRenderer.addMessage('user', msg);
       msgInput.value = '';
@@ -4204,7 +4202,6 @@ function startShadowApp() {
 
 
   if (window.hljs) {
-    console.log('Highlighting all code blocks on page load');
     document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
       window.hljs.highlightElement(block);
     });

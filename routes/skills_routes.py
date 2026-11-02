@@ -647,7 +647,7 @@ def _audit_finalize_status(skills_manager, name: str, owner, verdict: str,
 def _apply_skill_md(skills_manager, name: str, md: str, owner) -> bool:
     """Parse + persist an edited SKILL.md. Returns True on success."""
     try:
-        from services.memory.skill_format import Skill, slugify
+        from services.memory.skill_format import Skill
         sk = Skill.from_markdown(md)
         # Pin the identity: the audit's fixer is now allowed to edit frontmatter
         # (tags/category/when_to_use/description), but it must NEVER rename the
@@ -1171,7 +1171,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         text = (body or {}).get("text", "")
         if not isinstance(text, str) or not text.strip():
             raise HTTPException(400, "text is required")
-        from src.settings import get_setting, save_settings, load_settings
+        from src.settings import save_settings, load_settings
         settings = load_settings()
         ov = settings.get("builtin_tool_overrides")
         if not isinstance(ov, dict):

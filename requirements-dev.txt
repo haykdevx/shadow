@@ -1,0 +1,25 @@
+# Test / lint dependencies. The runtime stack (requirements.txt) pulls in
+# heavy ML/audio/browser packages that the test suite does not need; CI and
+# contributors install this file instead for a fast, deterministic test run.
+pytest
+pytest-asyncio
+ruff
+fastapi
+uvicorn
+httpx
+python-multipart
+python-dotenv
+pydantic>=2.0
+pydantic-settings>=2.0
+SQLAlchemy
+bcrypt
+pyotp
+croniter
+cryptography
+beautifulsoup4
+markdown
+icalendar
+python-dateutil
+pypdf
+numpy
+qrcode[pil]

@@ -15,7 +15,7 @@ Docker is the recommended path for normal testing. Demo mode is the preferred wa
 
 
 ```bash
-git clone https://github.com/haykdevx/dev.git
+git clone https://github.com/haykdevx/shadow.git
 cd shadow
 cp .env.example .env
 docker compose up -d --build

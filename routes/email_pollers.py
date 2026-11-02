@@ -18,7 +18,6 @@ Pure helpers live in `email_helpers.py`. Routes themselves live in
 
 import email as email_mod
 import email.utils  # the `email` binding is referenced as email.utils.parseaddr inside the pass
-import smtplib
 import json
 import re
 import html
@@ -37,7 +36,6 @@ from routes.email_helpers import (
     _imap_connect, _imap, _decode_header,
     _detect_sent_folder, _detect_spam_folder, _imap_move,
     _extract_attachment_text, _extract_text,
-    _pre_retrieve_context,
     _attach_compose_uploads, _cleanup_compose_uploads, _q,
     SCHEDULED_DB, _EMAIL_REPLY_SYS_PROMPT_BASE,
 )
@@ -716,8 +714,11 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                                     from src.settings import load_settings as _ls
                                     _pub = (_ls().get("app_public_url") or "").rstrip("/")
                                     uid_str = uid.decode() if isinstance(uid, bytes) else str(uid)
-                                    from urllib.parse import quote as _q
-                                    open_url = f"{_pub}/#email={_q(_folder, safe='')}:{uid_str}" if _pub else ""
+                                    # NB: must not be named `_q` — that would shadow the module-level
+                                    # IMAP folder quoter and make every `_q(folder)` call above in this
+                                    # function raise UnboundLocalError.
+                                    from urllib.parse import quote as _urlquote
+                                    open_url = f"{_pub}/#email={_urlquote(_folder, safe='')}:{uid_str}" if _pub else ""
 
                                     alert_subject = f"[{urgency.upper()}] {subject}"
                                     alert_body = (
